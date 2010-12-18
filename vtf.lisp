@@ -13,12 +13,13 @@
 (defun fail (fmt &rest args)
   "Indicate test failure"
   (let ((*print-level* 4) ; FIXME - extract constants
-	(*print-length* 10))
+	(*print-length* 100))
     (error 'test-failure :message (apply #'format nil fmt args))))
 
 (defun expand-fail (fmt args fmt1 &rest args1)
   `(fail ,@(if fmt
-               `("~?: ~?" ,fmt1 (list ,@args1) ,fmt (list ,@args))
+               #+nil`("~?: ~?" ,fmt1 (list ,@args1) ,fmt (list ,@args))
+               `(,fmt ,@args)
                `(,fmt1 ,@args1))))
 
 (defun expand-is (test fmt args &optional neg-p)
@@ -264,20 +265,38 @@
 (defclass logged-fixture ()
   ((log :accessor log-of :initform '())))
 
+(defun format-list (l)
+  (let ((p *package*))
+    (loop for item in l
+          collect (with-output-to-string (out)
+                    (with-standard-io-syntax
+                        (let ((*package* p))
+                          (write item :stream out)))))))
+
+(defun diff (expected actual)
+  (with-output-to-string (out)
+    (difflib:unified-diff
+     out (format-list expected) (format-list actual)
+     :test-function #'equal
+     :from-file "expected" :to-file "actual")))
+
 (defmacro expecting (&body body)
   (let* ((p (or (position '==> body)
                 (error "==> not found")))
          (actual-body (subseq body 0 p))
-         (expected (subseq body (1+ p))))
-    `(progn
-       (let ((log-start (log-of *fixture*)))
-         (progn ,@actual-body)
-         (let ((log-tail (reverse (ldiff (log-of *fixture*) log-start))))
-           (is (equal (list ,@(loop for item in expected
-                                    collect (if (atom item)
-                                                item
-                                                `(list ,@item))))
-                      log-tail)))))))
+         (expected-in (subseq body (1+ p))))
+    (with-gensyms (log-start actual expected)
+      `(progn
+         (let ((,log-start (log-of *fixture*)))
+           (progn ,@actual-body)
+           (let ((,actual (reverse (ldiff (log-of *fixture*) ,log-start)))
+                 (,expected (list ,@(loop for item in expected-in
+                                          collect (if (atom item)
+                                                      item
+                                                      `(list ,@item))))))
+             (is (equal ,expected ,actual)
+                 "log mismatch:~%~a"
+                 (diff ,expected ,actual))))))))
 
 (defun << (&rest things)
   (dolist (item things)
