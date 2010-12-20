@@ -161,9 +161,11 @@
 
 (defmacro define-fixture (name direct-superclasses direct-slots &rest options)
   `(progn
-     (defclass ,name ,direct-superclasses ,direct-slots ,@options)
+     (defclass ,name ,direct-superclasses ,direct-slots
+       ,@(remove :abstract options :key #'first))
      (setf (get ',name 'fixture-p) t)
-     (pushnew ',name (gethash (symbol-package ',name) *package-fixtures*))))
+     ,@(unless (find :abstract options :key #'first)
+         `((pushnew ',name (gethash (symbol-package ',name) *package-fixtures*))))))
 
 ;;; PACKAGES
 
@@ -262,6 +264,8 @@
 
 ;;; LOGGED-FIXTURE & related
 
+(defvar *verbose-test-logging* nil)
+
 (defclass logged-fixture ()
   ((log :accessor log-of :initform '())))
 
@@ -300,7 +304,9 @@
 
 (defun << (&rest things)
   (dolist (item things)
-    (push item (log-of *fixture*))))
+    (push item (log-of *fixture*))
+    (when *verbose-test-logging*
+      (format *debug-io* "~&<< ~s~%" item))))
 
 (defmacro <<< (&rest things)
   (flet ((expand (thing)
@@ -308,3 +314,5 @@
                thing
                `(list ',thing := ,thing))))
     `(<< ,@(mapcar #'expand things))))
+
+;; TBD: call setup / teardown inside handler-case for each test!!!

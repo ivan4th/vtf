@@ -7,5 +7,6 @@
              #:def-suite #:in-suite
              #:setup #:teardown
              #:run-tests #:run-all-tests
+             #:*verbose-test-logging*
              #:logged-fixture #:expecting #:<< #:<<< #:==>)
   (:use :cl :alexandria))
