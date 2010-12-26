@@ -220,7 +220,8 @@
      ,@(if slots
            `((with-slots ,slots *fixture*
                ,@body))
-           body)))
+           body)
+     *fixture*))
 
 (defmacro deftest (name slots (&optional fixture-spec &rest options) &body body)
   (declare (ignore options))
