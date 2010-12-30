@@ -1,12 +1,13 @@
 (defpackage :vtf
     (:export #:is #:is-true #:is-false #:fail #:signals
              #:test-failure
+             #:*test-verbose*
              #:*fixture* #:*last-fixture*
              #:test #:deftest
              #:define-fixture #:with-fixture #:setup-fixture
              #:def-suite #:in-suite
              #:setup #:teardown
-             #:run-tests #:run-all-tests
+             #:run-tests
              #:*verbose-test-logging*
              #:logged-fixture #:expecting #:<< #:<<< #:==>)
   (:use :cl :alexandria))

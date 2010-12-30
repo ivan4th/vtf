@@ -1,5 +1,333 @@
 (in-package :vtf)
 
+(defvar *test-items* '())
+(defvar *test-verbose* t)
+(defvar *fixture* nil)
+(defvar *last-fixture* nil)
+(defvar *keep-fixture* nil)
+
+;;; PROTOCOL
+
+(defgeneric run-test-item (item))
+
+(defgeneric setup (fixture))
+
+(defgeneric teardown (fixture))
+
+(defgeneric n-passed (result))
+
+(defgeneric failed-names (result))
+
+(defgeneric display-result (result stream))
+
+(defgeneric aggregate-title (result))
+
+(defgeneric condition-result (condition))
+
+(defgeneric fixture-names (fixture)
+  (:method-combination append))
+
+;;; TEST RESULT
+
+(defclass test-result ()
+  ((name :reader name
+         :initarg :name
+         :type (or string symbol null)
+         :initform (error "must specify the name of the test result"))))
+
+(defclass single-check-result (test-result) ())
+
+(defclass single-check-success (single-check-result) ())
+
+(defmethod n-passed ((result single-check-success)) 1)
+
+(defmethod failed-names ((result single-check-success)) '())
+
+(defmethod display-result ((result single-check-success) stream)
+  (format stream "~&*** PASS: ~s~%" (name result)))
+
+(defclass single-check-failure (single-check-result)
+  ((condition :reader result-condition
+              :initarg :condition
+              :type (or condition null)
+              :initform nil)))
+
+(defmethod n-passed ((result single-check-failure)) 0)
+
+(defmethod failed-names ((result single-check-failure))
+  (list (name result)))
+
+(defmethod display-result ((result single-check-failure) stream)
+  (if (result-condition result)
+      (format stream "~&*** FAIL: ~s~%~s: ~a~%---~%"
+              (name result) (type-of (result-condition result))
+              (result-condition result))
+      (format stream "~&*** FAIL: ~s~%" (name result))))
+
+(defclass aggregate-result (test-result)
+  ((children :accessor children :initarg :children
+             :type list
+             :initform '())))
+
+(defmethod n-passed ((result aggregate-result))
+  (reduce #'+ (mapcar #'n-passed (children result))))
+
+(defmethod failed-names ((result aggregate-result))
+  (reduce #'append (mapcar #'failed-names (children result))))
+
+(defmethod display-result ((result aggregate-result) stream)
+  (let ((n-passed (n-passed result))
+        (failed (failed-names result)))
+    (format stream
+            "~&---~%*** Total~@[ in ~A~]: ~s tests, ~s passed, ~s failed~@[: ~s~]~%"
+            (aggregate-title result)
+            (+ n-passed (length failed))
+            n-passed (length failed) failed)))
+
+(defclass fixture-result (aggregate-result) ())
+
+(defmethod aggregate-title ((result fixture-result))
+  (format nil "fixture ~a" (name result)))
+
+(defclass package-result (aggregate-result) ())
+
+(defmethod aggregate-title ((result package-result))
+  (format nil "package ~a" (name result)))
+
+(defclass global-result (aggregate-result) ())
+
+(defmethod aggregate-title ((result global-result)) nil)
+
+;;; CHECKS
+
+(define-condition check-condition ()
+  ((handled-p :accessor handled-p :initform nil)
+   (name :reader name :initarg :name
+         :initform (error "must specify check condition name"))))
+
+(define-condition check-passed (check-condition) ())
+
+(defmethod condition-result ((condition check-passed))
+  (make-instance 'single-check-success
+                 :name (name condition)))
+
+(define-condition check-failed (check-condition)
+  ((inner-condition :reader inner-condition :initarg :inner-condition
+                    :initform nil)))
+
+(defmethod condition-result ((condition check-failed))
+  (make-instance 'single-check-failure
+                 :name (name condition)
+                 :condition (inner-condition condition)))
+
+;;; TEST ITEM
+
+(defclass test-item ()
+  ((name :accessor name :type symbol :initarg :name
+         :initform (error "must specify test item name"))
+   (item-package :accessor item-package :type (or package null)
+                 :initarg :item-package
+                 :initform (error "must specify the package"))))
+
+(defmethod print-object ((object test-item) stream)
+  (print-unreadable-object (object stream :type t)
+    (prin1 (name object) stream)))
+
+;;; TEST CASE
+
+(defclass test-case (test-item)
+  ((fixture-name :accessor fixture-name :type symbol :initarg :fixture-name
+                 :initform (error "must specify fixture name"))
+   (test-function :accessor test-function :type symbol :initarg :test-function
+                  :initform (error "must specify test function"))))
+
+(defmethod run-test-item ((test-case test-case))
+  (let ((check-results '())
+        (pass-p t))
+    (handler-bind ((check-condition
+                    #'(lambda (c)
+                        (unless (handled-p c)
+                          (setf (handled-p c) t)
+                          (let ((result (condition-result c)))
+                            (when *test-verbose*
+                              (display-result result *debug-io*))
+                            (push result check-results)
+                            (setf pass-p (and pass-p
+                                              (null (failed-names result)))))))))
+      (let ((*fixture* (or *fixture*
+                           (when (fixture-name test-case)
+                             (make-instance (fixture-name test-case)))))
+            (result-name (name test-case)))
+        (setf *last-fixture* *fixture*)
+        (cond (*keep-fixture*
+               (setup *fixture*)
+               (funcall (test-function test-case) *fixture*))
+              (t
+               (handler-case
+                   (progn
+                     (setup *fixture*)
+                     (unwind-protect
+                          (funcall (test-function test-case) *fixture*)
+                       (teardown *fixture*))
+                     (signal (if pass-p 'check-passed 'check-failed)
+                             :name result-name))
+                 (serious-condition (condition)
+                   (signal 'check-failed
+                           :name result-name
+                           :inner-condition condition)))))))
+    (nreverse check-results)))
+
+;;; TEST LISTS
+
+(defun run-children (result-class name items)
+  (let ((result
+         (make-instance
+          result-class
+          :name name
+          :children              
+          (loop for item in items
+                append (run-test-item
+                        (if (consp item)
+                            (destructuring-bind (item-type name) item
+                              (or (get name item-type)
+                                  (error "no such item ~s of type ~s" name item-type)))
+                            item))))))
+    (when *test-verbose*
+      (display-result result *debug-io*))
+    (list result)))
+
+;;; FIXTURE
+
+;; TBD: default setup / teardown implementation (should cover nil)
+
+(defclass fixture-test-list (test-item) ())
+
+(defmethod run-test-item ((test-list fixture-test-list))
+  (let* ((*fixture* (make-instance (name test-list)))
+         (fixture-names (fixture-names *fixture*)))
+    (run-children 'fixture-result (name test-list)
+                  (sort
+                   (loop for item in *test-items*
+                         for (item-type name) = item
+                         when (and (eq 'test-case item-type)
+                                   (member
+                                     (fixture-name (get name 'test-case))
+                                     fixture-names))
+                           collect item)
+                   #'string< :key #'second))))
+
+(defmacro define-fixture (name direct-superclasses direct-slots &rest options)
+  `(progn
+     (defclass ,name ,direct-superclasses ,direct-slots
+       ,@(remove :abstract options :key #'first))
+     (defmethod fixture-names append ((fixture ,name)) (list ',name))
+     ,@(unless (find :abstract options :key #'first)
+         `((pushnew (list 'fixture ',name) *test-items* :test #'equal)
+           (setf (get ',name 'fixture)
+                 (make-instance 'fixture-test-list
+                                :name ',name
+                                :item-package *package*))))))
+
+(defmethod setup ((fixture t)) nil)
+
+(defmethod teardown ((fixture t)) nil)
+
+;;; PACKAGE
+
+(defmethod run-test-item ((package package))
+  (run-children 'package-result (package-name package)
+                (sort
+                 (loop for item in *test-items*
+                       for (item-type name) = item
+                       when (eq package
+                                (item-package
+                                 (or (get name item-type)
+                                     (error "bad item ~s of type ~s"
+                                            name item-type))))
+                         collect item)
+                 #'string< :key #'second)))
+
+
+;;; RUNNING ALL TESTS
+
+(defmethod run-test-item ((item (eql :all)))
+  (run-children 'global-result nil
+                (sort
+                 (remove-duplicates
+                  (loop for (item-type name) in *test-items*
+                        for item = (get name item-type)
+                        when (item-package item)
+                          collect (item-package item)))
+                 #'string<
+                 :key #'package-name)))
+
+
+;;; CONVENIENCE
+
+(defun run-tests (&optional (name t))
+  (cond ((eq t name)
+         (run-test-item :all))
+        ((get name 'test-case)
+         (run-test-item (get name 'test-case)))
+        ((get name 'fixture)
+         (run-test-item (get name 'fixture)))
+        ((find-package name)
+         (run-test-item (find-package name)))
+        (t
+         (error "cannot locate any tests for the specified name: ~s" name))))
+
+;;; TEST and DEFTEST macros
+
+(defmacro test (spec &body body)
+  #+nil (simple-style-warning "TEST is retained only for 5am compatibility")
+  (destructuring-bind (name &key suite)
+      (ensure-list spec)
+    (declare (ignore suite)) ;; FIXME: 5am compat
+    `(deftest ,name () () ,@body)))
+
+(defun setup-fixture (name)
+  (let ((fixture (make-instance name)))
+    (setup fixture)
+    fixture))
+
+(defmacro with-fixture (slots expr &body body)
+  `(let ((*fixture* ,expr)) ;; needed for direct invocation
+     ,@(if slots
+           `((with-slots ,slots *fixture*
+               ,@body))
+           body)
+     *fixture*))
+
+(defmacro deftest (name slots (&optional fixture-spec &rest options) &body body)
+  (declare (ignore options))
+  (assert (or (not (null fixture-spec))
+              (null slots))
+          () "cannot specify slots without fixture")
+  (assert (or (null fixture-spec)
+              (typep fixture-spec '(or symbol
+                                    (cons symbol (cons symbol nil)))))
+          () "invalid fixture spec ~s" fixture-spec)
+  (let ((actual-func-name (symbolicate "%ACTUAL-" name)))
+    (multiple-value-bind (fixture-var fixture-name)
+        (etypecase fixture-spec
+          (null (values (gensym) nil))
+          (symbol (values (gensym) fixture-spec))
+          (t (values (first fixture-spec) (second fixture-spec))))
+      `(progn
+         (defun ,actual-func-name (,fixture-var)
+           (with-fixture ,slots ,fixture-var ,@body))
+         (pushnew (list 'test-case ',name) *test-items* :test #'equal)
+         (setf (get ',name 'test-case)
+               (make-instance 'test-case
+                              :name ',name
+                              :fixture-name ',fixture-name
+                              :item-package ,(unless fixture-name '*package*)
+                              :test-function ',actual-func-name))
+         (defun ,name ()
+           (let ((*keep-fixture* t))
+             (run-test-item (get ',name 'test-case))
+             *last-fixture*))))))
+
 ;;; ASSERTIONS
 
 (define-condition test-failure (serious-condition) 
@@ -39,11 +367,11 @@
                   ,(if neg-p
                        `(when (,check ,v)
                           ,(expand-fail fmt args
-                                        "~s evaluated to ~s which satisfies ~s while it shoudln't"
+                                        "~s evaluated to ~s~%which satisfies ~s while it shoudln't"
                                         `(quote ,value-form) v `(quote ,check)))
                        `(unless (,check ,v)
                           ,(expand-fail fmt args
-                                        "~s evaluated to ~s which doesn't satisfy ~s"
+                                        "~s evaluated to ~s~%which doesn't satisfy ~s"
                                         `(quote ,value-form) v `(quote ,check))))))))
           ((proper-length-p 3)
            (destructuring-bind (pred expected actual) test
@@ -56,12 +384,12 @@
                   ,(if neg-p
                        `(when (,pred ,exp ,act)
                           ,(expand-fail fmt args
-                                        "~s evaluated to~%~s which is ~s to ~s =~%~s while it shouldn't"
+                                        "~s evaluated to~%~s~%which is ~s to ~s =~%~s while it shouldn't"
                                         `(quote ,actual) act `(quote ,pred)
                                         `(quote ,expected) exp))
                        `(unless (,pred ,exp ,act)
                           ,(expand-fail fmt args
-                                        "~s evaluated to~%~s which isn't ~s to ~s =~%~s"
+                                        "~s evaluated to~%~s~%which isn't ~s to ~s =~%~s"
                                         `(quote ,actual) act `(quote ,pred)
                                         `(quote ,expected) exp)))))))
           (t
@@ -95,175 +423,7 @@
                                    `(quote ,condition)))
        (,condition () nil))))
 
-;;; PROTOCOL
-
-(defgeneric test-items (object))
-
-(defgeneric test-item-name (object)
-  (:method ((object t)) nil))
-
-(defgeneric run-tests (object)
-  (:method (object)
-    (let ((n-pass 0)
-          (failed '()))
-      (dolist (item (test-items object))
-        (setup item)
-        (unwind-protect
-             (multiple-value-bind (np f)
-                 (run-tests item)
-               (incf n-pass np)
-               (appendf failed f))
-          (teardown item)))
-      (format t "~&---~%*** TOTAL~@[ IN ~A~]: ~s tests, ~s passed, ~s failed~@[: ~s~]~%"
-              (test-item-name object)
-              (+ n-pass (length failed))
-              n-pass (length failed) failed)
-      (values n-pass failed))))
-
-(defgeneric setup (fixture)
-  (:method ((fixture t)) nil))
-
-(defgeneric teardown (fixture)
-  (:method ((fixture t)) nil))
-
-;;; TEST CASE
-
-(defclass test-case ()
-  ((name :accessor name :initarg :name)
-   (test-function :accessor test-function :initarg :test-function)))
-
-(defmethod run-tests ((object test-case))
-  (handler-case
-      (progn
-        (funcall (test-function object))
-        (format t "~&*** PASS: ~s~%" (name object))
-        (values 1 '()))
-    (serious-condition (c)
-      (format t "~&*** FAIL: ~s~%~s: ~a~%---~%" (name object) (type-of c) c)
-      (values 0 (list (name object))))))
-
-;;; FIXTURES
-
-(defvar *package-fixtures* (make-hash-table))
-(defvar *fixture-test-cases* (make-hash-table))
-(defvar *fixture* nil)
-(defvar *last-fixture* nil)
-
-(defmethod test-item-name ((fixture standard-object))
-  (format nil "FIXTURE ~s" (type-of fixture)))
-
-(defmethod test-items ((fixture standard-object))
-  (reverse (gethash (type-of fixture) *fixture-test-cases*)))
-
-(defmethod run-tests ((fixture standard-object))
-  (let ((*fixture* (setf *last-fixture* fixture)))
-    (call-next-method)))
-
-(defmacro define-fixture (name direct-superclasses direct-slots &rest options)
-  `(progn
-     (defclass ,name ,direct-superclasses ,direct-slots
-       ,@(remove :abstract options :key #'first))
-     (setf (get ',name 'fixture-p) t)
-     ,@(unless (find :abstract options :key #'first)
-         `((pushnew ',name (gethash (symbol-package ',name) *package-fixtures*))))))
-
-;;; PACKAGES
-
-(defvar *package-test-cases* (make-hash-table))
-
-(defmethod test-item-name ((package package))
-  (format nil "PACKAGE ~s" (package-name package)))
-
-(defmethod test-items ((package package))
-  (append (mapcar #'make-instance
-                  (reverse (gethash (find-package package) *package-fixtures*)))
-          (reverse (gethash (find-package package) *package-test-cases*))))
-
-;;; CONVENIENCE
-
-(defmethod test-items ((object (eql t)))
-  (sort (union (hash-table-keys *package-test-cases*)
-               (hash-table-keys *package-fixtures*))
-        #'string< :key #'package-name))
-
-(defmethod run-tests ((name symbol))
-  (cond ((eq t name)
-         (call-next-method))
-        ((get name 'test-case)
-         (run-tests (get name 'test-case)))
-        ((get name 'fixture-p)
-         (run-tests (make-instance name)))
-        ((find-package name)
-         (run-tests (find-package name)))
-        (t
-         (error "cannot locate any tests for the specified name: ~s" name))))
-
-(defun run-all-tests ()
-  (run-tests t))
-
-;;; TEST and DEFTEST macros
-
-(defmacro test (spec &body body)
-  #+nil (simple-style-warning "TEST is retained only for 5am compatibility")
-  (destructuring-bind (name &key suite)
-      (ensure-list spec)
-    (declare (ignore suite)) ;; FIXME: 5am compat
-    `(deftest ,name () () ,@body)))
-
-(defun setup-fixture (name)
-  (let ((fixture (make-instance name)))
-    (setup fixture)
-    fixture))
-
-(defmacro with-fixture (slots expr &body body)
-  `(let ((*fixture* ,expr)) ;; needed for direct invocation
-     ,@(if slots
-           `((with-slots ,slots *fixture*
-               ,@body))
-           body)
-     *fixture*))
-
-(defmacro deftest (name slots (&optional fixture-spec &rest options) &body body)
-  (declare (ignore options))
-  (assert (or (not (null fixture-spec))
-              (null slots))
-          () "cannot specify slots without fixture")
-  (assert (or (null fixture-spec)
-              (typep fixture-spec '(or symbol
-                                    (cons symbol (cons symbol nil)))))
-          () "invalid fixture spec ~s" fixture-spec)
-  (multiple-value-bind (fixture-var fixture-name)
-      (etypecase fixture-spec
-        (null (values (gensym) nil))
-        (symbol (values (gensym) fixture-spec))
-        (t (values (first fixture-spec) (second fixture-spec))))
-    `(progn
-       (defun ,name (&optional ,(if fixture-name
-                                    `(,fixture-var (setup-fixture ',fixture-name))
-                                    fixture-var))
-         (with-fixture ,slots ,fixture-var ,@body))
-       (pushnew ',name
-                ,(if fixture-name
-                     `(gethash ',fixture-name *fixture-test-cases*)
-                     `(gethash (symbol-package ',name) *package-test-cases*)))
-       (setf (get ',name 'test-case)
-             (make-instance 'test-case
-                            :name ',name
-                            :test-function ',name)))))
-
-;;; 5AM COMPAT (to be removed)
-
-(defmacro in-suite (name)
-  (declare (ignore name))
-  #+nil (simple-style-warning "IN-SUITE is retained only for 5am compatibility")
-  nil)
-
-(defmacro def-suite (&rest args)
-  (declare (ignore args))
-  #+nil (simple-style-warning "DEF-SUITE is retained only for 5am compatibility")
-  nil)
-
-;;; LOGGED-FIXTURE & related
+;;; LOGGED-FIXTURE
 
 (defvar *verbose-test-logging* nil)
 
@@ -315,5 +475,3 @@
                thing
                `(list ',thing := ,thing))))
     `(<< ,@(mapcar #'expand things))))
-
-;; TBD: call setup / teardown inside handler-case for each test!!!
