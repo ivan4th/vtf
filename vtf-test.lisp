@@ -76,6 +76,12 @@
 (defmethod setup :after ((fixture inherited-fixture))
   (push :setup-inherited-fixture (seq fixture)))
 
+(defmethod run-fixture-test-case ((fixture inherited-fixture) (test-case t) teardown-p)
+  (push :run-fixture-test-case-in (seq fixture))
+  (unwind-protect
+       (call-next-method)
+    (push :run-fixture-test-case-out (seq fixture))))
+
 (defmethod teardown :before ((fixture inherited-fixture))
   (push :teardown-inherited-fixture (seq fixture)))
 
@@ -93,29 +99,37 @@
     (is (equal '(test-for-base-fixture/fail test-for-inherited-fixture/fail)
                (vtf::failed-names (first results))))
     (is-true (typep *last-fixture* 'inherited-fixture))
-    (is (equal '(:setup-base-fixture
+    (is (equal '(:run-fixture-test-case-in
+                 :setup-base-fixture
                  :setup-inherited-fixture
                  :test-for-base-fixture/fail
                  :teardown-inherited-fixture
                  :teardown-base-fixture
+                 :run-fixture-test-case-out
 
+                 :run-fixture-test-case-in
                  :setup-base-fixture
                  :setup-inherited-fixture
                  :test-for-base-fixture/pass
                  :teardown-inherited-fixture
                  :teardown-base-fixture
+                 :run-fixture-test-case-out
 
+                 :run-fixture-test-case-in
                  :setup-base-fixture
                  :setup-inherited-fixture
                  :test-for-inherited-fixture/fail
                  :teardown-inherited-fixture
                  :teardown-base-fixture
+                 :run-fixture-test-case-out
 
+                 :run-fixture-test-case-in
                  :setup-base-fixture
                  :setup-inherited-fixture
                  :test-for-inherited-fixture/pass
                  :teardown-inherited-fixture
-                 :teardown-base-fixture)
+                 :teardown-base-fixture
+                 :run-fixture-test-case-out)
                (reverse
                 (seq *last-fixture*))))))
 

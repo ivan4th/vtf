@@ -14,6 +14,8 @@
 
 (defgeneric teardown (fixture))
 
+(defgeneric run-fixture-test-case (fixture test-case teardown-p))
+
 (defgeneric n-passed (result))
 
 (defgeneric failed-names (result))
@@ -141,6 +143,13 @@
    (test-function :accessor test-function :type symbol :initarg :test-function
                   :initform (error "must specify test function"))))
 
+(defmethod run-fixture-test-case ((fixture t) (test-case test-case) teardown-p)
+  (setup fixture)
+  (unwind-protect
+       (funcall (test-function test-case) fixture)
+    (when teardown-p
+      (teardown fixture))))
+
 (defmethod run-test-item ((test-case test-case))
   (let ((check-results '())
         (pass-p t))
@@ -160,15 +169,11 @@
             (result-name (name test-case)))
         (setf *last-fixture* *fixture*)
         (cond (*keep-fixture*
-               (setup *fixture*)
-               (funcall (test-function test-case) *fixture*))
+               (run-fixture-test-case *fixture* test-case nil))
               (t
                (handler-case
                    (progn
-                     (setup *fixture*)
-                     (unwind-protect
-                          (funcall (test-function test-case) *fixture*)
-                       (teardown *fixture*))
+                     (run-fixture-test-case *fixture* test-case t)
                      (signal (if pass-p 'check-passed 'check-failed)
                              :name result-name))
                  (serious-condition (condition)
@@ -305,7 +310,7 @@
           () "cannot specify slots without fixture")
   (assert (or (null fixture-spec)
               (typep fixture-spec '(or symbol
-                                    (cons symbol (cons symbol nil)))))
+                                    (cons symbol (cons symbol null)))))
           () "invalid fixture spec ~s" fixture-spec)
   (let ((actual-func-name (symbolicate "%ACTUAL-" name)))
     (multiple-value-bind (fixture-var fixture-name)
@@ -356,7 +361,13 @@
                 (length= n test)))
          (values-p (x)
            (and (proper-list-p x)
-                (eq 'values (first x)))))
+                (eq 'values (first x))))
+         (constant-value-p (x)
+           (or (numberp x)
+               (stringp x)
+               (keywordp x)
+               (and (proper-list-p x)
+                    (eq 'quote (first x))))))
     (cond ((and (proper-length-p 2)
                 (eq 'not (first test)))
            (expand-is (second test) fmt args (not neg-p)))
@@ -383,15 +394,23 @@
                             (,act ,actual)))
                   ,(if neg-p
                        `(when (,pred ,exp ,act)
-                          ,(expand-fail fmt args
-                                        "~s evaluated to~%~s~%which is ~s to ~s =~%~s while it shouldn't"
-                                        `(quote ,actual) act `(quote ,pred)
-                                        `(quote ,expected) exp))
+                          ,(if (constant-value-p expected)
+                               (expand-fail fmt args
+                                            "~s evaluated to~%~s~%which is ~s to~%~s while it shouldn't"
+                                            `(quote ,actual) act `(quote ,pred) exp)
+                               (expand-fail fmt args
+                                            "~s evaluated to~%~s~%which is ~s to~%~s =~%~s while it shouldn't"
+                                            `(quote ,actual) act `(quote ,pred)
+                                            `(quote ,expected) exp)))
                        `(unless (,pred ,exp ,act)
-                          ,(expand-fail fmt args
-                                        "~s evaluated to~%~s~%which isn't ~s to ~s =~%~s"
-                                        `(quote ,actual) act `(quote ,pred)
-                                        `(quote ,expected) exp)))))))
+                          ,(if (constant-value-p expected)
+                               (expand-fail fmt args
+                                            "~s evaluated to~%~s~%which isn't ~s to~%~s"
+                                            `(quote ,actual) act `(quote ,pred) exp)
+                               (expand-fail fmt args
+                                            "~s evaluated to~%~s~%which isn't ~s to~%~s =~%~s"
+                                            `(quote ,actual) act `(quote ,pred)
+                                            `(quote ,expected) exp))))))))
           (t
            `(is-true ,test ,fmt ,@args)))))
 
@@ -435,7 +454,8 @@
     (loop for item in l
           collect (with-output-to-string (out)
                     (with-standard-io-syntax
-                        (let ((*package* p))
+                        (let ((*package* p)
+                              (*print-readably* nil))
                           (write item :stream out)))))))
 
 (defun diff (expected actual)
