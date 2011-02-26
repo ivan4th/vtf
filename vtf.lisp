@@ -14,7 +14,7 @@
 
 (defgeneric teardown (fixture))
 
-(defgeneric run-fixture-test-case (fixture test-case teardown-p))
+(defgeneric run-fixture-test-case (fixture test-case teardown-p debug-p))
 
 (defgeneric n-passed (result))
 
@@ -122,6 +122,12 @@
                  :name (name condition)
                  :condition (inner-condition condition)))
 
+(defun check-passed (name)
+  (signal 'check-passed :name name))
+
+(defun check-failed (name &optional condition)
+  (signal 'check-failed :name name :condition condition))
+
 ;;; TEST ITEM
 
 (defclass test-item ()
@@ -143,16 +149,32 @@
    (test-function :accessor test-function :type symbol :initarg :test-function
                   :initform (error "must specify test function"))))
 
-(defmethod run-fixture-test-case ((fixture t) (test-case test-case) teardown-p)
-  (setup fixture)
-  (unwind-protect
-       (funcall (test-function test-case) fixture)
-    (when teardown-p
-      (teardown fixture))))
+(defmethod run-fixture-test-case ((fixture t) (test-case test-case) teardown-p debug-p)
+  (let ((pass-p t))
+    (flet ((run ()
+             (handler-bind ((check-failed
+                             #'(lambda (c)
+                                 (unless (handled-p c)
+                                   (setf pass-p nil)))))
+               (setup fixture)
+               (unwind-protect
+                    (funcall (test-function test-case) fixture)
+                 (when teardown-p
+                   (teardown fixture))))))
+      (if debug-p
+          (run)
+          (handler-case
+              (progn
+                (run)
+                (signal (if pass-p 'check-passed 'check-failed)
+                        :name (name test-case)))
+            (serious-condition (condition)
+              (signal 'check-failed
+                      :name (name test-case)
+                      :inner-condition condition)))))))
 
 (defmethod run-test-item ((test-case test-case))
-  (let ((check-results '())
-        (pass-p t))
+  (let ((check-results '()))
     (handler-bind ((check-condition
                     #'(lambda (c)
                         (unless (handled-p c)
@@ -160,26 +182,13 @@
                           (let ((result (condition-result c)))
                             (when *test-verbose*
                               (display-result result *debug-io*))
-                            (push result check-results)
-                            (setf pass-p (and pass-p
-                                              (null (failed-names result)))))))))
+                            (push result check-results))))))
       (let ((*fixture* (or *fixture*
                            (when (fixture-name test-case)
-                             (make-instance (fixture-name test-case)))))
-            (result-name (name test-case)))
+                             (make-instance (fixture-name test-case))))))
         (setf *last-fixture* *fixture*)
-        (cond (*keep-fixture*
-               (run-fixture-test-case *fixture* test-case nil))
-              (t
-               (handler-case
-                   (progn
-                     (run-fixture-test-case *fixture* test-case t)
-                     (signal (if pass-p 'check-passed 'check-failed)
-                             :name result-name))
-                 (serious-condition (condition)
-                   (signal 'check-failed
-                           :name result-name
-                           :inner-condition condition)))))))
+        (run-fixture-test-case *fixture* test-case (not *keep-fixture*)
+                               *keep-fixture*)))
     (nreverse check-results)))
 
 ;;; TEST LISTS

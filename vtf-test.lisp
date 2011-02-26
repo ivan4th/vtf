@@ -23,6 +23,16 @@
 
 (deftest/alt simple-fail () () (fail "oops ~d" 42))
 
+(deftest/alt multi-pass () ()
+  (check-passed 'some-test)
+  (check-passed 'another-test)
+  (check-passed "test 3"))
+
+(deftest/alt multi-fail () ()
+  (check-passed 'some-test)
+  (check-failed 'another-test)
+  (check-failed "test 3"))
+
 (deftest/self test-simple-pass
   (let ((results (run-tests 'simple-pass)))
     (is (length= 1 results))
@@ -35,6 +45,25 @@
     (is (= 0 (vtf::n-passed (first results))))
     (is (equal '(simple-fail)
                (vtf::failed-names (first results))))))
+
+(deftest/self test-multi-pass
+  (let ((results (run-tests 'multi-pass)))
+    (is (length= 4 results))
+    (dolist (item results)
+      (is (= 1 (vtf::n-passed item)))
+      (is (null (vtf::failed-names item))))))
+
+(deftest/self test-multi-fail
+  (let ((results (run-tests 'multi-fail)))
+    (is (length= 4 results))
+    (is (= 1 (vtf::n-passed (first results))))
+    (is (null (vtf::failed-names (first results))))
+    (is (= 0 (vtf::n-passed (second results))))
+    (is (equal '(another-test) (vtf::failed-names (second results))))
+    (is (= 0 (vtf::n-passed (third results))))
+    (is (equal '("test 3") (vtf::failed-names (third results))))
+    (is (= 0 (vtf::n-passed (fourth results))))
+    (is (equal '(multi-fail) (vtf::failed-names (fourth results))))))
 
 (with-alt-tests
   (define-fixture base-fixture ()
@@ -76,7 +105,7 @@
 (defmethod setup :after ((fixture inherited-fixture))
   (push :setup-inherited-fixture (seq fixture)))
 
-(defmethod run-fixture-test-case ((fixture inherited-fixture) (test-case t) teardown-p)
+(defmethod run-fixture-test-case ((fixture inherited-fixture) (test-case t) teardown-p debug-p)
   (push :run-fixture-test-case-in (seq fixture))
   (unwind-protect
        (call-next-method)
@@ -136,10 +165,11 @@
 (deftest/self test-package
   (let ((results (run-tests 'vtf-test)))
     (is (length= 1 results))
-    (is (= 4 (vtf::n-passed (first results))))
-    ;; base-fixture is executed before simple-fail
+    (is (= 9 (vtf::n-passed (first results))))
+    ;; base-fixture is executed before multi-fail / simple-fail
     (is (equal '(test-for-base-fixture/fail test-for-base-fixture/fail
-                 test-for-inherited-fixture/fail simple-fail)
+                 test-for-inherited-fixture/fail another-test
+                 "test 3" multi-fail simple-fail)
                (vtf::failed-names (first results))))))
 
 ;; TBD: test running all tests

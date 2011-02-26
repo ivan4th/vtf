@@ -1,5 +1,6 @@
 (defpackage :vtf
     (:export #:is #:is-true #:is-false #:fail #:signals
+             #:check-failed #:check-passed
              #:test-failure
              #:*test-verbose*
              #:*fixture* #:*last-fixture*
