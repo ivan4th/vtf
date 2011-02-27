@@ -2,6 +2,7 @@
 
 (defvar *test-items* '())
 (defvar *test-verbose* t)
+(defvar *current-test-case* nil)
 (defvar *fixture* nil)
 (defvar *last-fixture* nil)
 (defvar *keep-fixture* nil)
@@ -13,6 +14,8 @@
 (defgeneric setup (fixture))
 
 (defgeneric teardown (fixture))
+
+(defgeneric invoke-test-case (fixture test-case))
 
 (defgeneric run-fixture-test-case (fixture test-case teardown-p debug-p))
 
@@ -49,10 +52,14 @@
   (format stream "~&*** PASS: ~s~%" (name result)))
 
 (defclass single-check-failure (single-check-result)
-  ((condition :reader result-condition
-              :initarg :condition
-              :type (or condition null)
-              :initform nil)))
+  ((kind :reader kind
+         :initarg :kind
+         :type keyword
+         :initform :fail)
+   (cause :reader cause
+          :initarg :cause
+          :type (or condition string null)
+          :initform nil)))
 
 (defmethod n-passed ((result single-check-failure)) 0)
 
@@ -60,11 +67,15 @@
   (list (name result)))
 
 (defmethod display-result ((result single-check-failure) stream)
-  (if (result-condition result)
-      (format stream "~&*** FAIL: ~s~%~s: ~a~%---~%"
-              (name result) (type-of (result-condition result))
-              (result-condition result))
-      (format stream "~&*** FAIL: ~s~%" (name result))))
+  (cond ((not (cause result))
+         (format stream "~&*** ~a: ~s~%" (kind result) (name result)))
+        ((typep (cause result) 'condition)
+         (format stream "~&*** ~a: ~s~%~s: ~a~%---~%"
+                 (kind result) (name result) (type-of (cause result))
+                 (cause result)))
+        (t
+         (format stream "~&*** ~a: ~s~%~a~%---~%"
+                 (kind result) (name result) (cause result)))))
 
 (defclass aggregate-result (test-result)
   ((children :accessor children :initarg :children
@@ -114,19 +125,26 @@
                  :name (name condition)))
 
 (define-condition check-failed (check-condition)
-  ((inner-condition :reader inner-condition :initarg :inner-condition
-                    :initform nil)))
+  ((kind :reader kind
+         :initarg :kind
+         :type keyword
+         :initform :fail)
+   (cause :reader cause
+          :initarg :cause
+          :type (or condition string null)
+          :initform nil)))
 
 (defmethod condition-result ((condition check-failed))
   (make-instance 'single-check-failure
                  :name (name condition)
-                 :condition (inner-condition condition)))
+                 :kind (kind condition)
+                 :cause (cause condition)))
 
 (defun check-passed (name)
   (signal 'check-passed :name name))
 
-(defun check-failed (name &optional condition)
-  (signal 'check-failed :name name :condition condition))
+(defun check-failed (name &optional (kind :fail) cause)
+  (signal 'check-failed :name name :kind kind :cause cause))
 
 ;;; TEST ITEM
 
@@ -149,16 +167,32 @@
    (test-function :accessor test-function :type symbol :initarg :test-function
                   :initform (error "must specify test function"))))
 
+(defmethod print-object ((test-case test-case) stream)
+  (print-unreadable-object (test-case stream :type t)
+    (prin1 (name test-case) stream)))
+
+(defmethod invoke-test-case ((fixture t) (test-case test-case))
+  (funcall (test-function test-case) fixture))
+
 (defmethod run-fixture-test-case ((fixture t) (test-case test-case) teardown-p debug-p)
-  (let ((pass-p t))
+  (let ((*current-test-case* test-case)
+        (pass-p t)
+        (need-to-signal t))
     (flet ((run ()
              (handler-bind ((check-failed
                              #'(lambda (c)
                                  (unless (handled-p c)
-                                   (setf pass-p nil)))))
+                                   (setf pass-p nil)
+                                   (when (eq (name test-case) (name c))
+                                     (setf need-to-signal nil)))))
+                            (check-passed
+                             #'(lambda (c)
+                                 (unless (handled-p c)
+                                   (when (eq (name test-case) (name c))
+                                     (setf need-to-signal nil))))))
                (setup fixture)
                (unwind-protect
-                    (funcall (test-function test-case) fixture)
+                    (invoke-test-case fixture test-case)
                  (when teardown-p
                    (teardown fixture))))))
       (if debug-p
@@ -166,12 +200,13 @@
           (handler-case
               (progn
                 (run)
-                (signal (if pass-p 'check-passed 'check-failed)
-                        :name (name test-case)))
+                (when need-to-signal
+                  (signal (if pass-p 'check-passed 'check-failed)
+                          :name (name test-case))))
             (serious-condition (condition)
               (signal 'check-failed
                       :name (name test-case)
-                      :inner-condition condition)))))))
+                      :cause condition)))))))
 
 (defmethod run-test-item ((test-case test-case))
   (let ((check-results '()))
@@ -275,21 +310,6 @@
                  #'string<
                  :key #'package-name)))
 
-
-;;; CONVENIENCE
-
-(defun run-tests (&optional (name t))
-  (cond ((eq t name)
-         (run-test-item :all))
-        ((get name 'test-case)
-         (run-test-item (get name 'test-case)))
-        ((get name 'fixture)
-         (run-test-item (get name 'fixture)))
-        ((find-package name)
-         (run-test-item (find-package name)))
-        (t
-         (error "cannot locate any tests for the specified name: ~s" name))))
-
 ;;; TEST and DEFTEST macros
 
 (defmacro test (spec &body body)
@@ -313,7 +333,6 @@
      *fixture*))
 
 (defmacro deftest (name slots (&optional fixture-spec &rest options) &body body)
-  (declare (ignore options))
   (assert (or (not (null fixture-spec))
               (null slots))
           () "cannot specify slots without fixture")
@@ -336,7 +355,8 @@
                               :name ',name
                               :fixture-name ',fixture-name
                               :item-package ,(unless fixture-name '*package*)
-                              :test-function ',actual-func-name))
+                              :test-function ',actual-func-name
+                              ,@options))
          (defun ,name ()
            (let ((*keep-fixture* t))
              (run-test-item (get ',name 'test-case))
@@ -467,6 +487,9 @@
                               (*print-readably* nil))
                           (write item :stream out)))))))
 
+(defmethod setup :after ((fixture logged-fixture))
+  (setf (log-of fixture) '()))
+
 (defun diff (expected actual)
   (with-output-to-string (out)
     (difflib:unified-diff
@@ -504,3 +527,201 @@
                thing
                `(list ',thing := ,thing))))
     `(<< ,@(mapcar #'expand things))))
+
+;;; ABT support
+
+(defgeneric abt-compare (type expected-path actual))
+(defgeneric abt-pprintable (type))
+(defgeneric abt-pprint (type data stream))
+(defgeneric abt-load (type path))
+(defgeneric abt-store (type data path))
+(defgeneric abt-file-type (type))
+
+(defvar *abt-read-function*
+  #'(lambda (path)
+      (handler-case
+          (read-from-string
+           (babel:octets-to-string
+            (read-file-into-byte-vector path)))
+        (file-error () nil))))
+(defvar *abt-write-function*
+  #'(lambda (data path)
+      (write-byte-vector-into-file
+       (babel:string-to-octets
+        (write-to-string data))
+       path :if-exists :supersede)))
+(defvar *abt-del-function*
+  #'(lambda (path)
+      (delete-file path)))
+(defvar *abt-dir-function*
+  #'(lambda (path)
+      (directory (merge-pathnames
+                  (make-pathname :name :wild :type :wild)
+                  path))))
+(defvar *abt-path*)
+(defvar *abt-section*)
+(defvar *abt-diff-items* '())
+(defvar *abt-missing* '())
+(defvar *abt-note-missing*)
+
+(defmethod abt-compare ((type (eql :lisp)) expected actual)
+  (equal expected actual))
+
+(defmethod abt-pprintable ((type (eql :lisp))) t)
+
+(defmethod abt-pprint ((type (eql :lisp)) data stream)
+  (with-standard-io-syntax
+      (let ((*print-pretty* t)
+            (*print-circle* t)
+            (*print-right-margin* 70))
+        (write data :stream stream))))
+
+(defmethod abt-load ((type (eql :lisp)) path)
+  (funcall *abt-read-function* path))
+
+(defmethod abt-store ((type (eql :lisp)) data path)
+  (funcall *abt-write-function* data path)
+  #+nil
+  (with-standard-io-syntax
+      (write data :stream stream)))
+
+(defmethod abt-file-type ((type (eql :lisp))) "dat")
+
+(defun abt-file-name (name type)
+  (concatenate 'string
+               (cl-ppcre:regex-replace-all
+                "[\\\\/:]"
+                (etypecase name
+                  (string name)
+                  (symbol (string-downcase name)))
+                "-")
+               "." (abt-file-type type)))
+
+(defun abt-path (name type)
+  (merge-pathnames (abt-file-name name type) *abt-path*))
+
+(defmacro with-abt-section ((path &key (note-missing t) (diff-p t)) &body body)
+  (once-only (path note-missing)
+    `(let ((*abt-path* ,path)
+           (*abt-section* '()))
+       ,@(if diff-p
+             `(,@body (abt-diff :note-missing ,note-missing))
+             body))))
+
+(defun abt-emit (data name &optional (type :lisp))
+  (push (list name data type) *abt-section*))
+
+(defun report-abt-diff (name type expected actual)
+  (flet ((format-data->list (data)
+           (cl-ppcre:split "[ \\t]*\\n"
+                           (with-output-to-string (out)
+                             (abt-pprint type data out)))))
+    (signal 'check-failed
+            :name name
+            :kind (if expected :diff :new)
+            :cause (with-output-to-string (diff-out)
+                     (difflib:unified-diff
+                      diff-out
+                      (when expected (format-data->list expected))
+                      (format-data->list actual)
+                      :test-function #'equal
+                      :from-file "expected" :to-file "actual")))))
+
+(defun abt-diff (&key note-missing)
+  (let* ((all-files (mapcar #'file-namestring (funcall *abt-dir-function* *abt-path*)))
+         (pass-p t)
+         (found
+          (handler-bind ((check-failed
+                          #'(lambda (c)
+                              (unless (handled-p c)
+                                (setf pass-p nil)))))
+            (loop for (name actual type) in (reverse *abt-section*)
+                  for path = (abt-path name type)
+                  for expected = (abt-load type path)
+                  collect (abt-file-name name type)
+                  when (abt-compare type expected actual)
+                    do (check-passed name)
+                  else
+                    do (report-abt-diff name type expected actual)
+                       (deletef *abt-diff-items* name :test #'equal :key #'second)
+                       (push (list path name actual type) *abt-diff-items*)
+                  end))))
+    (let* ((missing (when note-missing (set-difference all-files found :test #'equal)))
+           (name (if *current-test-case* (name *current-test-case*) 'no-test-case))
+           (signalled-p (find name *abt-section* :key #'first :test #'equal)))
+      (cond (missing
+             (nunionf *abt-missing*
+                      (loop for filename in missing
+                            collect (merge-pathnames filename *abt-path*))
+                      :test #'equal)
+             (unless signalled-p
+               (check-failed name :missing-items
+                             (format nil "~{~a~^~%~}" missing))))
+            (signalled-p nil)
+            ((not pass-p)
+             (check-failed name :missing-items
+                           (format nil "~{~a~^~%~}" missing)))
+            (t
+             (check-passed name))))))
+
+(defun abt-accept (&optional names)
+  (flet ((accept (item)
+           (destructuring-bind (path name actual type) item
+             (format *debug-io* "~&;; ACCEPT: ~s --> ~s~%" name path)
+             (abt-store type actual path))))
+    (cond (names
+           (loop for name in names
+                 do (if-let ((item (find name *abt-diff-items*
+                                         :key #'second
+                                         :test #'equal)))
+                      (accept item)
+                      (warn "ABT item ~s not found" name))))
+          (t
+           (mapc #'accept *abt-diff-items*)
+           (loop for path in *abt-missing*
+                 do (format *debug-io* "~&;; DELETE: ~s~%" path)
+                    (funcall *abt-del-function* path))
+           (abt-reset)))))
+
+(defun abt-reset ()
+  (setf *abt-diff-items* '() *abt-missing* '()))
+
+;;; ABT fixture
+
+(defgeneric abt-data-location (fixture))
+
+(defun abt-get-location (fixture)
+  (let ((loc (abt-data-location fixture)))
+    (etypecase loc
+      (pathname loc)
+      (string (pathname loc))
+      (proper-list
+         (unless (and (<= 2 (length loc) 3)
+                      (eq :asdf (first loc))
+                      (typep (second loc) '(or symbol string))
+                      (typep (third loc) '(or null string pathname)))
+           (error "invalid loc spec ~s" loc))
+         (asdf:system-relative-pathname (second loc) (or (third loc) #p"./"))))))
+
+(defclass abt-fixture (logged-fixture)
+  ((data-location :reader abt-data-location :initarg :data-location)))
+
+(defmethod invoke-test-case ((fixture abt-fixture) (test-case test-case))
+  (with-abt-section ((abt-get-location fixture) :note-missing nil)
+    (call-next-method)
+    (abt-emit (reverse (log-of fixture)) (name test-case))))
+
+;;; CONVENIENCE
+
+(defun run-tests (&optional (name t))
+  (abt-reset)
+  (cond ((eq t name)
+         (run-test-item :all))
+        ((get name 'test-case)
+         (run-test-item (get name 'test-case)))
+        ((get name 'fixture)
+         (run-test-item (get name 'fixture)))
+        ((find-package name)
+         (run-test-item (find-package name)))
+        (t
+         (error "cannot locate any tests for the specified name: ~s" name))))

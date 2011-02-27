@@ -33,37 +33,25 @@
   (check-failed 'another-test)
   (check-failed "test 3"))
 
+(defun verify-results (results &rest items)
+  (is (= (/ (length items) 2) (length results)))
+  (loop for (n-passed failed-names) on items by #'cddr
+        for result in results
+        do (is (= n-passed (vtf::n-passed result)))
+           (is (equal failed-names (vtf::failed-names result)))))
+
 (deftest/self test-simple-pass
-  (let ((results (run-tests 'simple-pass)))
-    (is (length= 1 results))
-    (is (= 1 (vtf::n-passed (first results))))
-    (is (null (vtf::failed-names (first results))))))
+  (verify-results (run-tests 'simple-pass) 1 '()))
 
 (deftest/self test-simple-fail
-  (let ((results (run-tests 'simple-fail)))
-    (is (length= 1 results))
-    (is (= 0 (vtf::n-passed (first results))))
-    (is (equal '(simple-fail)
-               (vtf::failed-names (first results))))))
+  (verify-results (run-tests 'simple-fail) 0 '(simple-fail)))
 
 (deftest/self test-multi-pass
-  (let ((results (run-tests 'multi-pass)))
-    (is (length= 4 results))
-    (dolist (item results)
-      (is (= 1 (vtf::n-passed item)))
-      (is (null (vtf::failed-names item))))))
+  (verify-results (run-tests 'multi-pass) 1 '() 1 '() 1 '() 1 '()))
 
 (deftest/self test-multi-fail
-  (let ((results (run-tests 'multi-fail)))
-    (is (length= 4 results))
-    (is (= 1 (vtf::n-passed (first results))))
-    (is (null (vtf::failed-names (first results))))
-    (is (= 0 (vtf::n-passed (second results))))
-    (is (equal '(another-test) (vtf::failed-names (second results))))
-    (is (= 0 (vtf::n-passed (third results))))
-    (is (equal '("test 3") (vtf::failed-names (third results))))
-    (is (= 0 (vtf::n-passed (fourth results))))
-    (is (equal '(multi-fail) (vtf::failed-names (fourth results))))))
+  (verify-results (run-tests 'multi-fail)
+                  1 '() 0 '(another-test) 0 '("test 3") 0 '(multi-fail)))
 
 (with-alt-tests
   (define-fixture base-fixture ()
@@ -83,20 +71,17 @@
   (fail "failed"))
 
 (deftest/self test-plain-fixture
-  (let ((results (run-tests 'base-fixture)))
-    (is (length= 1 results))
-    (is (= 1 (vtf::n-passed (first results))))
-    (is (equal '(test-for-base-fixture/fail)
-               (vtf::failed-names (first results))))
-    (is-true (typep *last-fixture* 'base-fixture))
-    (is (equal '(:setup-base-fixture
-                 :test-for-base-fixture/fail
-                 :teardown-base-fixture
-                 :setup-base-fixture
-                 :test-for-base-fixture/pass
-                 :teardown-base-fixture)
-               (reverse
-                (seq *last-fixture*))))))
+  (verify-results (run-tests 'base-fixture)
+                  1 '(test-for-base-fixture/fail))
+  (is-true (typep *last-fixture* 'base-fixture))
+  (is (equal '(:setup-base-fixture
+               :test-for-base-fixture/fail
+               :teardown-base-fixture
+               :setup-base-fixture
+               :test-for-base-fixture/pass
+               :teardown-base-fixture)
+             (reverse
+              (seq *last-fixture*)))))
 
 (with-alt-tests
   (define-fixture inherited-fixture (base-fixture)
@@ -122,55 +107,166 @@
   (fail "failed"))
 
 (deftest/self test-inherited-fixture
-  (let ((results (run-tests 'inherited-fixture)))
-    (is (length= 1 results))
-    (is (= 2 (vtf::n-passed (first results))))
-    (is (equal '(test-for-base-fixture/fail test-for-inherited-fixture/fail)
-               (vtf::failed-names (first results))))
-    (is-true (typep *last-fixture* 'inherited-fixture))
-    (is (equal '(:run-fixture-test-case-in
-                 :setup-base-fixture
-                 :setup-inherited-fixture
-                 :test-for-base-fixture/fail
-                 :teardown-inherited-fixture
-                 :teardown-base-fixture
-                 :run-fixture-test-case-out
+  (verify-results (run-tests 'inherited-fixture)
+                  2 '(test-for-base-fixture/fail test-for-inherited-fixture/fail))
+  (is-true (typep *last-fixture* 'inherited-fixture))
+  (is (equal '(:run-fixture-test-case-in
+               :setup-base-fixture
+               :setup-inherited-fixture
+               :test-for-base-fixture/fail
+               :teardown-inherited-fixture
+               :teardown-base-fixture
+               :run-fixture-test-case-out
 
-                 :run-fixture-test-case-in
-                 :setup-base-fixture
-                 :setup-inherited-fixture
-                 :test-for-base-fixture/pass
-                 :teardown-inherited-fixture
-                 :teardown-base-fixture
-                 :run-fixture-test-case-out
+               :run-fixture-test-case-in
+               :setup-base-fixture
+               :setup-inherited-fixture
+               :test-for-base-fixture/pass
+               :teardown-inherited-fixture
+               :teardown-base-fixture
+               :run-fixture-test-case-out
 
-                 :run-fixture-test-case-in
-                 :setup-base-fixture
-                 :setup-inherited-fixture
-                 :test-for-inherited-fixture/fail
-                 :teardown-inherited-fixture
-                 :teardown-base-fixture
-                 :run-fixture-test-case-out
+               :run-fixture-test-case-in
+               :setup-base-fixture
+               :setup-inherited-fixture
+               :test-for-inherited-fixture/fail
+               :teardown-inherited-fixture
+               :teardown-base-fixture
+               :run-fixture-test-case-out
 
-                 :run-fixture-test-case-in
-                 :setup-base-fixture
-                 :setup-inherited-fixture
-                 :test-for-inherited-fixture/pass
-                 :teardown-inherited-fixture
-                 :teardown-base-fixture
-                 :run-fixture-test-case-out)
-               (reverse
-                (seq *last-fixture*))))))
+               :run-fixture-test-case-in
+               :setup-base-fixture
+               :setup-inherited-fixture
+               :test-for-inherited-fixture/pass
+               :teardown-inherited-fixture
+               :teardown-base-fixture
+               :run-fixture-test-case-out)
+             (reverse
+              (seq *last-fixture*)))))
 
 (deftest/self test-package
-  (let ((results (run-tests 'vtf-test)))
-    (is (length= 1 results))
-    (is (= 9 (vtf::n-passed (first results))))
-    ;; base-fixture is executed before multi-fail / simple-fail
-    (is (equal '(test-for-base-fixture/fail test-for-base-fixture/fail
-                 test-for-inherited-fixture/fail another-test
-                 "test 3" multi-fail simple-fail)
-               (vtf::failed-names (first results))))))
+  ;; base-fixture (and then multi-diff-fixture) is executed before
+  ;; multi-fail / simple-fail. ABT fixtures fail because of absent
+  ;; data files
+  (verify-results (run-tests 'vtf-test)
+                  9 '(test-for-base-fixture/fail
+                      test-for-base-fixture/fail
+                      test-for-inherited-fixture/fail
+                      some-data "more-data" "extra" multi-diff
+                      another-test "test 3" multi-fail
+                      possibly-failing-single-diff single-diff-1
+                      single-diff-2 simple-fail)))
+
+(defvar *mangle-data* nil)
+
+(with-alt-tests
+  (define-fixture multi-diff-fixture () ()))
+
+(deftest/alt multi-diff () (multi-diff-fixture)
+  (with-abt-section (#p"/abc/def/")
+    (abt-emit '((:abc 123) (:def 456)) 'some-data)
+    (cond ((not *mangle-data*)
+           (abt-emit '((:qqq 555)) "more-data")
+           (abt-emit '(:zzz) "extra"))
+          (t
+           (abt-emit '((:qqq 666)) "more-data")
+           (abt-emit '(:zzz) "eprst")))))
+
+(defvar *fake-abt-data*)
+
+(defun invoke-with-fake-abt-data (thunk)
+  (flet ((validate-path (path)
+           (is (pathnamep path))
+           (is (equal '(:absolute "abc" "def") (pathname-directory path)))))
+    (let ((*fake-abt-data* (make-hash-table :test #'equal))
+          (vtf::*abt-read-function*
+           #'(lambda (path)
+               (validate-path path)
+               (values (gethash (file-namestring path) *fake-abt-data*))))
+          (vtf::*abt-write-function*
+           #'(lambda (data path)
+               (validate-path path)
+               (setf (gethash (file-namestring path) *fake-abt-data*)
+                     data)))
+          (vtf::*abt-del-function*
+           #'(lambda (path)
+               (validate-path path)
+               (is-true (nth-value 1 (gethash (file-namestring path) *fake-abt-data*)))
+               (remhash (file-namestring path) *fake-abt-data*)))
+          (vtf::*abt-dir-function*
+           #'(lambda (path)
+               (validate-path path)
+               (is (null (pathname-name path)))
+               (is (null (pathname-type path)))
+               (hash-table-keys *fake-abt-data*)))
+          (*mangle-data* nil))
+      (funcall thunk))))
+
+(defmacro with-fake-abt-data (&body body)
+  `(invoke-with-fake-abt-data #'(lambda () ,@body)))
+
+(deftest/self test-abt-multi-diff
+  (with-fake-abt-data
+    (verify-results (run-tests 'multi-diff-fixture)
+                    0 '(some-data "more-data" "extra" multi-diff))
+    (abt-accept '(some-data "more-data"))
+    (verify-results (run-tests 'multi-diff-fixture)
+                    2 '("extra" multi-diff))
+    (abt-accept)
+    (verify-results (run-tests 'multi-diff-fixture) 4 '())
+    (setf *mangle-data* t)
+    (verify-results (run-tests 'multi-diff-fixture)
+                    1 '("more-data" "eprst" multi-diff))
+    (abt-accept '("more-data" "eprst"))
+    (verify-results (run-tests 'multi-diff-fixture)
+                    3 '(multi-diff)) ;; one missing item remains
+    (abt-accept)
+    (verify-results (run-tests 'multi-diff-fixture) 4 '())))
+
+(with-alt-tests
+  (define-fixture sample-abt-fixture (abt-fixture)
+    ()
+    (:default-initargs :data-location #p"/abc/def/")))
+
+(deftest/alt single-diff-1 () (sample-abt-fixture)
+  (<< 'abc)
+  (if *mangle-data*
+      (<<< (+ 10 20))
+      (<<< (+ 1 2))))
+
+(deftest/alt single-diff-2 () (sample-abt-fixture)
+  (<< 'qqq 'rrr))
+
+(deftest/alt possibly-failing-single-diff () (sample-abt-fixture)
+  (<< 'zzz)
+  (when *mangle-data*
+    (fail "cannot mangle")))
+
+(deftest/self test-abt-single-diff
+  (with-fake-abt-data
+    (verify-results (run-tests 'sample-abt-fixture)
+                    0 '(possibly-failing-single-diff single-diff-1 single-diff-2))
+    (abt-accept '(possibly-failing-single-diff single-diff-1))
+    (verify-results (run-tests 'sample-abt-fixture)
+                    2 '(single-diff-2))
+    (abt-accept)
+    (verify-results (run-tests 'sample-abt-fixture) 3 '())
+    (setf *mangle-data* t)
+    (verify-results (run-tests 'sample-abt-fixture)
+                    1 '(possibly-failing-single-diff single-diff-1))
+    (abt-accept)
+    (verify-results (run-tests 'sample-abt-fixture)
+                    2 '(possibly-failing-single-diff))))
+
+(define-fixture sample-abt-fixture/real-fs (abt-fixture)
+  ()
+  (:default-initargs :data-location '(:asdf vtf-test)))
+
+(deftest sample-diff/real-fs () (sample-abt-fixture/real-fs)
+  (<< "some stuff goes here" 123)
+  (let ((x 5)
+        (y 42))
+    (<<< x y (+ x y))))
 
 ;; TBD: test running all tests
 ;; TBD: test checks
