@@ -10,6 +10,7 @@
              #:*test-verbose*
              #:*fixture*
              #:*last-fixture*
+             #:*redirect-test-output*
              #:test #:deftest
              #:define-fixture
              #:with-fixture

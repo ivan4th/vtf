@@ -6,6 +6,7 @@
 (defvar *fixture* nil)
 (defvar *last-fixture* nil)
 (defvar *keep-fixture* nil)
+(defvar *redirect-test-output* t)
 
 ;;; PROTOCOL
 
@@ -197,26 +198,41 @@
                    (teardown fixture))))))
       (if debug-p
           (run)
-          (handler-case
-              (progn
-                (run)
-                (when need-to-signal
-                  (signal (if pass-p 'check-passed 'check-failed)
-                          :name (name test-case))))
-            (serious-condition (condition)
-              (signal 'check-failed
-                      :name (name test-case)
-                      :cause condition)))))))
+          (let ((out (make-string-output-stream)))
+            (flet ((maybe-show-output ()
+                     (let ((output (get-output-stream-string out)))
+                       (unless (emptyp output)
+                         (write-string output *debug-io*)
+                         (fresh-line *debug-io*)
+                         (terpri *debug-io*)))))
+              (handler-case
+                  (progn
+                    (if *redirect-test-output*
+                        (let* ((*debug-io* (make-two-way-stream *debug-io* out))
+                               (*standard-output* out))
+                          (run))
+                        (run))
+                    (when need-to-signal
+                      (unless pass-p
+                        (maybe-show-output))
+                      (signal (if pass-p 'check-passed 'check-failed)
+                              :name (name test-case))))
+                (serious-condition (condition)
+                  (maybe-show-output)
+                  (signal 'check-failed
+                          :name (name test-case)
+                          :cause condition)))))))))
 
 (defmethod run-test-item ((test-case test-case))
-  (let ((check-results '()))
+  (let ((check-results '())
+        (io *debug-io*))
     (handler-bind ((check-condition
                     #'(lambda (c)
                         (unless (handled-p c)
                           (setf (handled-p c) t)
                           (let ((result (condition-result c)))
                             (when *test-verbose*
-                              (display-result result *debug-io*))
+                              (display-result result io))
                             (push result check-results))))))
       (let ((*fixture* (or *fixture*
                            (when (fixture-name test-case)
