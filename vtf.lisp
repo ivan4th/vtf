@@ -329,8 +329,7 @@
      ,@(if slots
            `((with-slots ,slots *fixture*
                ,@body))
-           body)
-     *fixture*))
+           body)))
 
 (defmacro deftest (name slots (&optional fixture-spec &rest options) &body body)
   (assert (or (not (null fixture-spec))
@@ -348,7 +347,8 @@
           (t (values (first fixture-spec) (second fixture-spec))))
       `(progn
          (defun ,actual-func-name (,fixture-var)
-           (with-fixture ,slots ,fixture-var ,@body))
+           (with-fixture ,slots ,fixture-var ,@body)
+           *fixture*)
          (pushnew (list 'test-case ',name) *test-items* :test #'equal)
          (setf (get ',name 'test-case)
                (make-instance 'test-case
