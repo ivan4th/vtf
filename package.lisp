@@ -38,6 +38,8 @@
              #:abt-emit
              #:abt-accept
              #:abt-clear
+             #:abt-rediff
              #:with-abt-section
+             #:abt-lisp-output-mixin
              #:abt-fixture)
   (:use :cl :alexandria))

@@ -160,7 +160,7 @@
 (defvar *mangle-data* nil)
 
 (with-alt-tests
-  (define-fixture multi-diff-fixture () ()))
+  (define-fixture multi-diff-fixture (abt-lisp-output-mixin) ()))
 
 (deftest/alt multi-diff () (multi-diff-fixture)
   (with-abt-section (#p"/abc/def/")

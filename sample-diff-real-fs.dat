@@ -1,1 +1,5 @@
-("some stuff goes here" 123 (X := 5) (Y := 42) ((+ X Y) := 47))
+"some stuff goes here"
+123
+(vtf-test::x := 5)
+(vtf-test::y := 42)
+((+ vtf-test::x vtf-test::y) := 47)

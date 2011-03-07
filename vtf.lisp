@@ -530,25 +530,40 @@
 
 ;;; ABT support
 
-(defgeneric abt-compare (type expected-path actual))
-(defgeneric abt-pprintable (type))
-(defgeneric abt-pprint (type data stream))
-(defgeneric abt-load (type path))
-(defgeneric abt-store (type data path))
-(defgeneric abt-file-type (type))
+(defgeneric abt-compare (fixture expected-path actual))
+(defgeneric abt-pprintable (fixture))
+(defgeneric abt-pprint (fixture data stream))
+(defgeneric abt-load (fixture path))
+(defgeneric abt-store (fixture data path))
+(defgeneric abt-file-type (fixture))
+
+(defclass abt-lisp-output-mixin () ())
 
 (defvar *abt-read-function*
   #'(lambda (path)
       (handler-case
-          (read-from-string
-           (babel:octets-to-string
-            (read-file-into-byte-vector path)))
+          (with-input-from-string
+              (in
+               (babel:octets-to-string
+                (read-file-into-byte-vector path)))
+            (let ((eof (cons nil nil)))
+              (loop for item = (read in nil eof)
+                    until (eq item eof)
+                    collect item)))
         (file-error () nil))))
 (defvar *abt-write-function*
   #'(lambda (data path)
       (write-byte-vector-into-file
        (babel:string-to-octets
-        (write-to-string data))
+        (with-standard-io-syntax
+            (with-output-to-string (out)
+              (dolist (item data)
+                (write item
+                       :stream out
+                       :pretty t
+                       :right-margin 95
+                       :case :downcase)
+                (terpri out)))))
        path :if-exists :supersede)))
 (defvar *abt-del-function*
   #'(lambda (path)
@@ -564,30 +579,31 @@
 (defvar *abt-missing* '())
 (defvar *abt-note-missing*)
 
-(defmethod abt-compare ((type (eql :lisp)) expected actual)
+(defmethod abt-compare ((fixture abt-lisp-output-mixin) expected actual)
   (equal expected actual))
 
-(defmethod abt-pprintable ((type (eql :lisp))) t)
+(defmethod abt-pprintable ((fixture abt-lisp-output-mixin)) t)
 
-(defmethod abt-pprint ((type (eql :lisp)) data stream)
+(defmethod abt-pprint ((fixture abt-lisp-output-mixin) data stream)
   (with-standard-io-syntax
-      (let ((*print-pretty* t)
-            (*print-circle* t)
-            (*print-right-margin* 70))
-        (write data :stream stream))))
+      (dolist (item data)
+        (write item
+               :stream stream
+               :pretty t
+               :circle t
+               :right-margin 95
+               :case :downcase)
+        (terpri stream))))
 
-(defmethod abt-load ((type (eql :lisp)) path)
+(defmethod abt-load ((fixture abt-lisp-output-mixin) path)
   (funcall *abt-read-function* path))
 
-(defmethod abt-store ((type (eql :lisp)) data path)
-  (funcall *abt-write-function* data path)
-  #+nil
-  (with-standard-io-syntax
-      (write data :stream stream)))
+(defmethod abt-store ((fixture abt-lisp-output-mixin) data path)
+  (funcall *abt-write-function* data path))
 
-(defmethod abt-file-type ((type (eql :lisp))) "dat")
+(defmethod abt-file-type ((fixture abt-lisp-output-mixin)) "dat")
 
-(defun abt-file-name (name type)
+(defun abt-file-name (name fixture)
   (concatenate 'string
                (cl-ppcre:regex-replace-all
                 "[\\\\/:]"
@@ -595,10 +611,10 @@
                   (string name)
                   (symbol (string-downcase name)))
                 "-")
-               "." (abt-file-type type)))
+               "." (abt-file-type fixture)))
 
-(defun abt-path (name type)
-  (merge-pathnames (abt-file-name name type) *abt-path*))
+(defun abt-path (name fixture)
+  (merge-pathnames (abt-file-name name fixture) *abt-path*))
 
 (defmacro with-abt-section ((path &key (note-missing t) (diff-p t)) &body body)
   (once-only (path note-missing)
@@ -608,14 +624,16 @@
              `(,@body (abt-diff :note-missing ,note-missing))
              body))))
 
-(defun abt-emit (data name &optional (type :lisp))
-  (push (list name data type) *abt-section*))
+(defun abt-emit (data name &optional (fixture *fixture*))
+  (setf *abt-section*
+        (cons (list name data fixture)
+              (delete name *abt-section* :key #'first))))
 
-(defun report-abt-diff (name type expected actual)
+(defun report-abt-diff (name fixture expected actual)
   (flet ((format-data->list (data)
            (cl-ppcre:split "[ \\t]*\\n"
                            (with-output-to-string (out)
-                             (abt-pprint type data out)))))
+                             (abt-pprint fixture data out)))))
     (signal 'check-failed
             :name name
             :kind (if expected :diff :new)
@@ -627,24 +645,41 @@
                       :test-function #'equal
                       :from-file "expected" :to-file "actual")))))
 
+(defun abt-rediff (&key (filter-expected #'identity)
+                   (filter-actual #'identity)
+                   (filter #'identity))
+  (loop for (path name actual-orig fixture) in (reverse *abt-diff-items*)
+        for actual = (funcall filter-actual
+                              (funcall filter actual-orig))
+        for expected = (funcall filter-expected
+                                (funcall filter (abt-load fixture path)))
+        unless (abt-compare fixture expected actual)
+          do (handler-case
+                 (report-abt-diff name fixture expected actual)
+               (check-failed (c)
+                 (display-result (condition-result c) *debug-io*)))
+        end))
+
 (defun abt-diff (&key note-missing)
-  (let* ((all-files (mapcar #'file-namestring (funcall *abt-dir-function* *abt-path*)))
+  (let* ((all-files (when note-missing
+                      (mapcar #'file-namestring (funcall *abt-dir-function* *abt-path*))))
          (pass-p t)
          (found
           (handler-bind ((check-failed
                           #'(lambda (c)
                               (unless (handled-p c)
                                 (setf pass-p nil)))))
-            (loop for (name actual type) in (reverse *abt-section*)
-                  for path = (abt-path name type)
-                  for expected = (abt-load type path)
-                  collect (abt-file-name name type)
-                  when (abt-compare type expected actual)
+            (loop for (name actual fixture) in (reverse *abt-section*)
+                  for path = (abt-path name fixture)
+                  for expected = (abt-load fixture path)
+                  collect (abt-file-name name fixture)
+                  when (abt-compare fixture expected actual)
                     do (check-passed name)
+                       (deletef *abt-diff-items* name :key #'second)
                   else
-                    do (report-abt-diff name type expected actual)
+                    do (report-abt-diff name fixture expected actual)
                        (deletef *abt-diff-items* name :test #'equal :key #'second)
-                       (push (list path name actual type) *abt-diff-items*)
+                       (push (list path name actual fixture) *abt-diff-items*)
                   end))))
     (let* ((missing (when note-missing (set-difference all-files found :test #'equal)))
            (name (if *current-test-case* (name *current-test-case*) 'no-test-case))
@@ -666,9 +701,9 @@
 
 (defun abt-accept (&optional names)
   (flet ((accept (item)
-           (destructuring-bind (path name actual type) item
+           (destructuring-bind (path name actual fixture) item
              (format *debug-io* "~&;; ACCEPT: ~s --> ~s~%" name path)
-             (abt-store type actual path))))
+             (abt-store fixture actual path))))
     (cond (names
            (loop for name in names
                  do (if-let ((item (find name *abt-diff-items*
@@ -703,13 +738,13 @@
            (error "invalid loc spec ~s" loc))
          (asdf:system-relative-pathname (second loc) (or (third loc) #p"./"))))))
 
-(defclass abt-fixture (logged-fixture)
+(defclass abt-fixture (abt-lisp-output-mixin logged-fixture)
   ((data-location :reader abt-data-location :initarg :data-location)))
 
 (defmethod invoke-test-case ((fixture abt-fixture) (test-case test-case))
   (with-abt-section ((abt-get-location fixture) :note-missing nil)
     (call-next-method)
-    (abt-emit (reverse (log-of fixture)) (name test-case))))
+    (abt-emit (reverse (log-of fixture)) (name test-case) fixture)))
 
 ;;; CONVENIENCE
 
