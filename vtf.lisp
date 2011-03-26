@@ -546,40 +546,26 @@
 
 ;;; ABT support
 
+;; TBD: it should be possible to specify per-testcase types
+;; need to add ABT-OUTPUT method that can be specialized
+;; on fixtures and test cases and returns class name of
+;; output mode
 (defgeneric abt-compare (fixture expected-path actual))
-(defgeneric abt-pprintable (fixture))
 (defgeneric abt-pprint (fixture data stream))
 (defgeneric abt-load (fixture path))
 (defgeneric abt-store (fixture data path))
 (defgeneric abt-file-type (fixture))
 
-(defclass abt-lisp-output-mixin () ())
-
 (defvar *abt-read-function*
   #'(lambda (path)
       (handler-case
-          (with-input-from-string
-              (in
-               (babel:octets-to-string
-                (read-file-into-byte-vector path)))
-            (let ((eof (cons nil nil)))
-              (loop for item = (read in nil eof)
-                    until (eq item eof)
-                    collect item)))
+          (babel:octets-to-string
+           (read-file-into-byte-vector path))
         (file-error () nil))))
 (defvar *abt-write-function*
   #'(lambda (data path)
       (write-byte-vector-into-file
-       (babel:string-to-octets
-        (with-standard-io-syntax
-            (with-output-to-string (out)
-              (dolist (item data)
-                (write item
-                       :stream out
-                       :pretty t
-                       :right-margin 95
-                       :case :downcase)
-                (terpri out)))))
+       (babel:string-to-octets data)
        path :if-exists :supersede)))
 (defvar *abt-del-function*
   #'(lambda (path)
@@ -595,10 +581,30 @@
 (defvar *abt-missing* '())
 (defvar *abt-note-missing*)
 
+(defclass abt-text-output-mixin () ())
+
+(defun preprocess-text (text)
+  (format nil "~{~a~}" (mapcar #'princ-to-string (ensure-list text))))
+
+(defmethod abt-compare ((fixture abt-text-output-mixin) expected actual)
+  (equal (preprocess-text expected)
+         (preprocess-text actual)))
+
+(defmethod abt-pprint ((fixture abt-text-output-mixin) data stream)
+  (write-string (preprocess-text data) stream))
+
+(defmethod abt-load ((fixture abt-text-output-mixin) path)
+  (funcall *abt-read-function* path))
+
+(defmethod abt-store ((fixture abt-text-output-mixin) data path)
+  (funcall *abt-write-function* (preprocess-text data) path))
+
+(defmethod abt-file-type ((fixture abt-text-output-mixin)) "dat")
+
+(defclass abt-lisp-output-mixin () ())
+
 (defmethod abt-compare ((fixture abt-lisp-output-mixin) expected actual)
   (equal expected actual))
-
-(defmethod abt-pprintable ((fixture abt-lisp-output-mixin)) t)
 
 (defmethod abt-pprint ((fixture abt-lisp-output-mixin) data stream)
   (with-standard-io-syntax
@@ -612,10 +618,25 @@
         (terpri stream))))
 
 (defmethod abt-load ((fixture abt-lisp-output-mixin) path)
-  (funcall *abt-read-function* path))
+  (when-let ((text (funcall *abt-read-function* path)))
+    (with-input-from-string (in text)
+      (let ((eof (cons nil nil)))
+        (loop for item = (read in nil eof)
+           until (eq item eof)
+           collect item)))))
 
 (defmethod abt-store ((fixture abt-lisp-output-mixin) data path)
-  (funcall *abt-write-function* data path))
+  (funcall *abt-write-function*
+           (with-standard-io-syntax
+             (with-output-to-string (out)
+               (dolist (item data)
+                 (write item
+                        :stream out
+                        :pretty t
+                        :right-margin 95
+                        :case :downcase)
+                 (terpri out))))
+           path))
 
 (defmethod abt-file-type ((fixture abt-lisp-output-mixin)) "dat")
 

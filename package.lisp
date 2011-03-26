@@ -29,7 +29,6 @@
              #:<<<
              #:==>
              #:abt-compare
-             #:abt-pprintable
              #:abt-pprint
              #:abt-load
              #:abt-store
@@ -41,6 +40,7 @@
              #:abt-clear
              #:abt-rediff
              #:with-abt-section
+             #:abt-text-output-mixin
              #:abt-lisp-output-mixin
              #:abt-fixture)
   (:use :cl :alexandria))
