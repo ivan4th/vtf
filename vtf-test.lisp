@@ -155,7 +155,8 @@
                       some-data "more-data" "extra" multi-diff
                       another-test "test 3" multi-fail
                       possibly-failing-single-diff single-diff-1
-                      single-diff-2 simple-fail)))
+                      single-diff-2 simple-fail
+                      something more-xml-stuff xml-diff)))
 
 (defvar *mangle-data* nil)
 
@@ -267,6 +268,29 @@
   (let ((x 5)
         (y 42))
     (<<< x y (+ x y))))
+
+(with-alt-tests
+  (define-fixture xml-diff-fixture (vtf-xml:abt-xml-output-mixin) ()))
+
+(deftest/alt xml-diff () (xml-diff-fixture)
+  (with-abt-section (#p"/abc/def/")
+    (abt-emit (if *mangle-data*
+                  "<a><x z='4'/></a>"
+                  "<a><x z='3'/></a>")
+              'something)
+    (abt-emit (cxml:parse-rod "<a f='1'/>" (stp:make-builder)) 'more-xml-stuff)))
+
+(deftest/self test-abt-xml-diff
+  (with-fake-abt-data
+    (verify-results (run-tests 'xml-diff-fixture)
+                    0 '(something more-xml-stuff xml-diff))
+    (abt-accept)
+    (verify-results (run-tests 'xml-diff-fixture) 3 '())
+    (setf *mangle-data* t)
+    (verify-results (run-tests 'xml-diff-fixture)
+                    1 '(something xml-diff))
+    (abt-accept)
+    (verify-results (run-tests 'xml-diff-fixture) 3 '())))
 
 ;; TBD: test running all tests
 ;; TBD: test checks

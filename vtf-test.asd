@@ -10,6 +10,6 @@
   :author "Ivan Shvedunov <ivan4th@gmail.com>"
   :version "0.1"
   :serial t
-  :depends-on (:alexandria :vtf)
+  :depends-on (:alexandria :vtf :vtf-xml)
   :components ((:file "test-package")
                (:file "vtf-test")))
