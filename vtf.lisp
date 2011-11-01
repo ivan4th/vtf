@@ -441,10 +441,10 @@
                        `(when (,pred ,exp ,act)
                           ,(if (constant-value-p expected)
                                (expand-fail fmt args
-                                            "~s evaluated to~%~s~%which is ~s to~%~s while it shouldn't"
+                                            "~s evaluated to~%~s~%which is ~s to ~s~%while it shouldn't"
                                             `(quote ,actual) act `(quote ,pred) exp)
                                (expand-fail fmt args
-                                            "~s evaluated to~%~s~%which is ~s to~%~s =~%~s while it shouldn't"
+                                            "~s evaluated to~%~s~%which is ~s to ~s =~%~s~%while it shouldn't"
                                             `(quote ,actual) act `(quote ,pred)
                                             `(quote ,expected) exp)))
                        `(unless (,pred ,exp ,act)
