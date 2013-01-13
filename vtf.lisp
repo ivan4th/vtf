@@ -542,23 +542,46 @@
 	   :test-function #'equal
 	   :from-file "expected" :to-file "actual"))))))
 
+(defun expand-expecting-1 (actual-body expected-in)
+  (with-gensyms (log-start actual expected)
+    `(let ((,log-start (log-of *fixture*)))
+       (progn ,@actual-body)
+       (let ((,actual (reverse (ldiff (log-of *fixture*) ,log-start)))
+	     (,expected (list ,@(loop for item in expected-in
+				      collect (if (atom item)
+						  item
+						  `(list ,@item))))))
+	 (is (equal ,expected ,actual)
+	     "log mismatch:~%~a"
+	     (diff ,expected ,actual))))))
+
 (defmacro expecting (&body body)
-  (let* ((p (or (position '==> body)
-                (error "==> not found")))
-         (actual-body (subseq body 0 p))
-         (expected-in (subseq body (1+ p))))
-    (with-gensyms (log-start actual expected)
-      `(progn
-         (let ((,log-start (log-of *fixture*)))
-           (progn ,@actual-body)
-           (let ((,actual (reverse (ldiff (log-of *fixture*) ,log-start)))
-                 (,expected (list ,@(loop for item in expected-in
-                                          collect (if (atom item)
-                                                      item
-                                                      `(list ,@item))))))
-             (is (equal ,expected ,actual)
-                 "log mismatch:~%~a"
-                 (diff ,expected ,actual))))))))
+  (let ((state :actual)
+	(act '())
+	(exp '())
+	(result '()))
+    (flet ((flush ()
+	     (push (expand-expecting-1 (nreverse act) (nreverse exp))
+		   result)
+	     (setf act '() exp '())))
+      (dolist (item body)
+	(case state
+	  (:actual
+	   (if (eq item '==>)
+	       (setf state :expected)
+	       (push item act)))
+	  (:expected
+	   (cond ((eq item '===)
+		  (flush)
+		  (setf state :actual))
+		 (t
+		  (push item exp))))))
+      (unless (eq :expected state)
+	(error "malformed body of EXPECTING"))
+      (flush)
+      (if (null (rest result))
+	  (first result)
+	  `(progn ,@(nreverse result))))))
 
 (defun << (&rest things)
   (dolist (item things)

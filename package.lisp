@@ -28,6 +28,7 @@
              #:<<
              #:<<<
              #:==>
+	     #:===
              #:abt-compare
              #:abt-pprint
              #:abt-load
