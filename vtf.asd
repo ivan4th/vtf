@@ -10,6 +10,6 @@
   :author "Ivan Shvedunov <ivan4th@gmail.com>"
   :version "0.1"
   :serial t
-  :depends-on (:alexandria :cl-difflib :cl-ppcre :babel)
+  :depends-on (:alexandria :cl-difflib :cl-ppcre :babel :split-sequence)
   :components ((:file "package")
                (:file "vtf")))

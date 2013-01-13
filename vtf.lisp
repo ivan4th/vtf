@@ -450,12 +450,14 @@
                        `(unless (,pred ,exp ,act)
                           ,(if (constant-value-p expected)
                                (expand-fail fmt args
-                                            "~s evaluated to~%~s~%which isn't ~s to~%~s"
-                                            `(quote ,actual) act `(quote ,pred) exp)
+                                            "~s evaluated to~%~s~%which isn't ~s to~%~s~@[~%DIFF:~%~a~]"
+                                            `(quote ,actual) act `(quote ,pred) exp
+					    `(maybe-diff-values ,exp ,act))
                                (expand-fail fmt args
-                                            "~s evaluated to~%~s~%which isn't ~s to~%~s =~%~s"
+                                            "~s evaluated to~%~s~%which isn't ~s to~%~s =~%~s~@[~%DIFF:~%~a~]"
                                             `(quote ,actual) act `(quote ,pred)
-                                            `(quote ,expected) exp))))))))
+                                            `(quote ,expected) exp
+					    `(maybe-diff-values ,exp ,act)))))))))
           (t
            `(is-true ,test ,fmt ,@args)))))
 
@@ -512,6 +514,33 @@
      out (format-list expected) (format-list actual)
      :test-function #'equal
      :from-file "expected" :to-file "actual")))
+
+(defparameter *min-diff-length* 30)
+
+(defun maybe-diff-values (expected actual)
+  "Produce unified diff between pretty-printed representation of
+   EXPECTED and ACTUAL if they're big enough for diff to make sense,
+   return NIL otherwise"
+  (flet ((format-value (v)
+	   (let ((p *package*))
+	     (with-standard-io-syntax
+	       (let ((*package* p)
+		     (*print-right-margin* 80)
+		     (*print-miser-width* 70)
+		     (*print-pretty* t)
+		     (*print-readably* nil))
+		 (split-sequence:split-sequence
+		  #\newline
+		  (prin1-to-string v)))))))
+    (let ((exp (format-value expected))
+	  (act (format-value actual)))
+      (when (or (> (reduce #'+ (mapcar #'length exp)) *min-diff-length*)
+		(> (reduce #'+ (mapcar #'length act)) *min-diff-length*))
+	(with-output-to-string (out)
+	  (difflib:unified-diff
+	   out exp act
+	   :test-function #'equal
+	   :from-file "expected" :to-file "actual"))))))
 
 (defmacro expecting (&body body)
   (let* ((p (or (position '==> body)
@@ -604,6 +633,11 @@
 (defclass abt-lisp-output-mixin () ())
 
 (defmethod abt-compare ((fixture abt-lisp-output-mixin) expected actual)
+  #+nil
+  (unless (equal expected actual)
+    (let ((p (mismatch expected actual :test #'equal)))
+      (when (and (< p (length expected)) (< p (length actual)))
+        (format *debug-io* "~&~s~%-----~%~s~%" (elt expected p) (elt actual p)))))
   (equal expected actual))
 
 (defmethod abt-pprint ((fixture abt-lisp-output-mixin) data stream)
