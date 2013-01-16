@@ -561,9 +561,10 @@
 	(exp '())
 	(result '()))
     (flet ((flush ()
-	     (push (expand-expecting-1 (nreverse act) (nreverse exp))
-		   result)
-	     (setf act '() exp '())))
+	     (when act
+	       (push (expand-expecting-1 (nreverse act) (nreverse exp))
+		     result)
+	       (setf act '() exp '()))))
       (dolist (item body)
 	(case state
 	  (:actual
@@ -576,7 +577,8 @@
 		  (setf state :actual))
 		 (t
 		  (push item exp))))))
-      (unless (eq :expected state)
+      (unless (or (eq :expected state)
+		  (null act))
 	(error "malformed body of EXPECTING"))
       (flush)
       (if (null (rest result))
