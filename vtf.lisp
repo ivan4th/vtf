@@ -375,7 +375,8 @@
                               ,@options))
          (defun ,name ()
            (let ((*keep-fixture* t))
-             (run-test-item (get ',name 'test-case))
+             (with-simple-restart (abort "Abort test case")
+               (run-test-item (get ',name 'test-case)))
              *last-fixture*))))))
 
 ;;; ASSERTIONS
