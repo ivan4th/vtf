@@ -249,7 +249,7 @@
          (make-instance
           result-class
           :name name
-          :children              
+          :children
           (loop for item in items
                 append (run-test-item
                         (if (consp item)
@@ -381,7 +381,7 @@
 
 ;;; ASSERTIONS
 
-(define-condition test-failure (serious-condition) 
+(define-condition test-failure (serious-condition)
   ((message :initform nil :initarg :message :accessor test-failure-message))
   (:report (lambda (condition stream)
 	     (format stream
@@ -545,16 +545,27 @@
 
 (defun expand-expecting-1 (actual-body expected-in)
   (with-gensyms (log-start actual expected)
-    `(let ((,log-start (log-of *fixture*)))
-       (progn ,@actual-body)
-       (let ((,actual (reverse (ldiff (log-of *fixture*) ,log-start)))
-	     (,expected (list ,@(loop for item in expected-in
-				      collect (if (atom item)
-						  item
-						  `(list ,@item))))))
-	 (is (equal ,expected ,actual)
-	     "log mismatch:~%~a"
-	     (diff ,expected ,actual))))))
+    (let ((use-set-p
+            (when (and (length= 1 expected-in)
+                       (proper-list-p (first expected-in))
+                       (eq :set (caar expected-in)))
+              (setf expected-in (rest (first expected-in)))
+              t)))
+      `(let ((,log-start (log-of *fixture*)))
+         (progn ,@actual-body)
+         (let ((,actual (reverse (ldiff (log-of *fixture*) ,log-start)))
+               (,expected (list ,@(loop for item in expected-in
+                                        collect (if (atom item)
+                                                    item
+                                                    `(list ,@item))))))
+           ,(if use-set-p
+                `(is (set-equal ,expected ,actual :test #'equal)
+                     "log mismatch:~%~@[Extra:~%~s~]~@[~&Missing:~%~s~]"
+                     (set-difference ,actual ,expected :test #'equal)
+                     (set-difference ,expected ,actual :test #'equal))
+                `(is (equal ,expected ,actual)
+                     "log mismatch:~%~a"
+                     (diff ,expected ,actual))))))))
 
 (defmacro expecting (&body body)
   (let ((state :actual)
