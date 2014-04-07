@@ -560,7 +560,11 @@
                                                     `(list ,@item))))))
            ,(if use-set-p
                 `(is (set-equal ,expected ,actual :test #'equal)
-                     "log mismatch:~%~@[Extra:~%~s~]~@[~&Missing:~%~s~]"
+                     "log mismatch:~%~
+                      ~@[Common:~%~s~]~
+                      ~@[~&Extra:~%~s~]~
+                      ~@[~&Missing:~%~s~]"
+                     (intersection ,actual ,expected :test #'equal)
                      (set-difference ,actual ,expected :test #'equal)
                      (set-difference ,expected ,actual :test #'equal))
                 `(is (equal ,expected ,actual)
