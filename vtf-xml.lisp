@@ -8,7 +8,9 @@
   (etypecase thing
     (stp:node thing)
     (string
-     (cxml:parse-rod thing (stp:make-builder)))))
+     (cxml:parse-rod thing (stp:make-builder)))
+    ((cons t null)
+     (ensure-xml (first thing)))))
 
 (defclass attribute-sorter (cxml:sax-proxy) ())
 
