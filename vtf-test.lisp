@@ -14,9 +14,9 @@
        (let ((vtf::*test-verbose* nil))
          ,@body))))
 
-(defmacro deftest/alt (name slots fixture-and-options &body body)
+(defmacro deftest/alt (name slots (&optional fixture-spec) &body body)
   `(with-alt-tests
-     (deftest ,name ,slots ,fixture-and-options
+     (deftest ,name ,slots (,fixture-spec)
        ,@body)))
 
 (deftest/alt simple-pass () () nil)

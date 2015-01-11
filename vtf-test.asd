@@ -6,9 +6,9 @@
 (in-package :vtf-test.system)
 
 (defsystem vtf-test
-  :description "Another test framework (tests)"
+  :description "A test framework with support for Adaptive Baseline Testing (tests)"
   :author "Ivan Shvedunov <ivan4th@gmail.com>"
-  :version "0.1"
+  :version "1.0"
   :serial t
   :depends-on (:alexandria :vtf :vtf-xml)
   :components ((:file "test-package")
