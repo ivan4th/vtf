@@ -53,8 +53,7 @@
           (t (values (first fixture-spec) (second fixture-spec))))
       `(progn
          (defun ,actual-func-name (,fixture-var)
-           (with-fixture ,slots ,fixture-var ,@body)
-           *fixture*)
+           (with-fixture ,slots ,fixture-var ,@body))
          (pushnew (list 'test-case ',name) *test-items* :test #'equal)
          (setf (get ',name 'test-case)
                (make-instance 'test-case

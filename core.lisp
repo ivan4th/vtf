@@ -262,7 +262,7 @@
                          (fresh-line *debug-io*)
                          (terpri *debug-io*)))))
               (handler-case
-                  (progn
+                  (prog1
                     (if *redirect-test-output*
                         (let* ((*debug-io* (make-two-way-stream *debug-io* out))
                                (*standard-output* out))
