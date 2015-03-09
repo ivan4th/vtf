@@ -273,7 +273,7 @@
                         (maybe-show-output))
                       (signal (if pass-p 'check-passed 'check-failed)
                               :name (name test-case))))
-                (serious-condition (condition)
+                (error (condition)
                   (maybe-show-output)
                   (signal 'check-failed
                           :name (name test-case)
