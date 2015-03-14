@@ -1,3 +1,7 @@
+(defpackage :vtf-xml
+  (:export #:abt-xml-output-mixin)
+  (:use :cl :alexandria :vtf))
+
 (in-package :vtf-xml)
 
 (defclass abt-xml-output-mixin () ())
@@ -60,6 +64,7 @@
 (defmethod abt-store ((fixture abt-xml-output-mixin) data path)
   (funcall vtf::*abt-write-function*
            (with-output-to-string (out)
+             ;; FIXME: perhaps should indent it after all
              (write-xml data out :no-indent-p t))
            path))
 

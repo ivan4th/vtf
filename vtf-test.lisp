@@ -152,6 +152,7 @@
                   9 '(test-for-base-fixture/fail
                       test-for-base-fixture/fail
                       test-for-inherited-fixture/fail
+                      json-something more-json-stuff json-diff
                       some-data "more-data" "extra" multi-diff
                       another-test "test 3" multi-fail
                       possibly-failing-single-diff single-diff-1
@@ -291,6 +292,30 @@
                     1 '(something xml-diff))
     (abt-accept)
     (verify-results (run-tests 'xml-diff-fixture) 3 '())))
+
+(with-alt-tests
+  (define-fixture json-diff-fixture (vtf-json:abt-json-output-mixin) ()))
+
+(deftest/alt json-diff () (json-diff-fixture)
+  (with-abt-section (#p"/abc/def/")
+    (abt-emit (st-json:jso "name" "a"
+                           "children"
+                           (list (st-json:jso "name" "x"
+                                              "z" (if *mangle-data* "4" "3"))))
+              'json-something)
+    (abt-emit (st-json:jso "name" "a" "f" "1") 'more-json-stuff)))
+
+(deftest/self test-abt-json-diff
+  (with-fake-abt-data
+    (verify-results (run-tests 'json-diff-fixture)
+                    0 '(json-something more-json-stuff json-diff))
+    (abt-accept)
+    (verify-results (run-tests 'json-diff-fixture) 3 '())
+    (setf *mangle-data* t)
+    (verify-results (run-tests 'json-diff-fixture)
+                    1 '(json-something json-diff))
+    (abt-accept)
+    (verify-results (run-tests 'json-diff-fixture) 3 '())))
 
 ;; TBD: test running all tests
 ;; TBD: test checks

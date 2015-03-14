@@ -11,5 +11,4 @@
   :version "0.1"
   :serial t
   :depends-on (:vtf :alexandria :cxml :cxml-stp)
-  :components ((:file "vtf-xml-package")
-               (:file "vtf-xml")))
+  :components ((:file "vtf-xml")))
