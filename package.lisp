@@ -20,6 +20,7 @@
            #:setup
            #:teardown
            #:run-fixture-test-case
+           #:invoke-test-case-outer
            #:invoke-test-case
            #:run-test-item
            #:run-tests

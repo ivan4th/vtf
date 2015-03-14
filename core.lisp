@@ -28,6 +28,17 @@
   (:documentation "Perform cleanup for FIXTURE after running a test case. Invoked
   once after each test case."))
 
+(defgeneric invoke-test-case-outer (fixture test-case teardown-p)
+  (:documentation "Run the specified TEST-CASE using FIXTURE,
+  including its SETUP/TEARDOWN code. Can be used to set up a dynamic
+  environment for the test case. TEARDOWN should only be performed
+  if TEARDOWN-P is true.
+
+  The default implementation performs SETUP - INVOKE-TEST-CASE -
+  (optional)TEARDOWN sequence and registers test success or failure.
+  An :around method can be used to set up a dynamic environment that
+  must affect both test case itself and SETUP/TEARDOWN methods."))
+
 (defgeneric invoke-test-case (fixture test-case)
   (:documentation "Run the specified TEST-CASE using FIXTURE. Invoked between
   SETUP and TEARDOWN. Can be used to set up a dynamic environment for the test
@@ -38,10 +49,7 @@
   fixture teardown if TEARDOWN-P is true. Handle any unhandled SERIOUS-CONDITIONs
   unless DEBUG-P is true.
 
-  The default implementation performs SETUP - INVOKE-TEST-CASE -
-  (optional)TEARDOWN sequence and registers test success or failure.
-  An :around method can be used to set up a dynamic environment that must
-  affect both test case itself and SETUP/TEARDOWN methods."))
+  Exported for compatibility, define methods on INVOKE-TEST-CASE-OUTER instead."))
 
 (defgeneric n-passed (result)
   (:documentation "Return a number of successful test cases recorded in RESULT"))
@@ -231,6 +239,13 @@
 (defmethod invoke-test-case ((fixture t) (test-case test-case))
   (funcall (test-function test-case) fixture))
 
+(defmethod invoke-test-case-outer ((fixture t) (test-case test-case) teardown-p)
+  (setup fixture)
+  (unwind-protect
+       (invoke-test-case fixture test-case)
+    (when teardown-p
+      (teardown fixture))))
+
 (defmethod run-fixture-test-case ((fixture t) (test-case test-case) teardown-p debug-p)
   (let ((*current-test-case* test-case)
         (pass-p t)
@@ -247,11 +262,7 @@
                                  (unless (handled-p c)
                                    (when (eq (name test-case) (name c))
                                      (setf need-to-signal nil))))))
-               (setup fixture)
-               (unwind-protect
-                    (invoke-test-case fixture test-case)
-                 (when teardown-p
-                   (teardown fixture))))))
+               (invoke-test-case-outer fixture test-case teardown-p))))
       (if debug-p
           (run)
           (let ((out (make-string-output-stream)))
