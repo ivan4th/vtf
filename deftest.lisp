@@ -61,8 +61,11 @@
                               :fixture-name ',fixture-name
                               :item-package ,(unless fixture-name '*package*)
                               :test-function ',actual-func-name))
-         (defun ,name ()
-           (let ((*keep-fixture* t))
-             (with-simple-restart (abort "Abort test case")
-               (run-test-item (get ',name 'test-case)))
-             *last-fixture*))))))
+         ,(with-gensyms (fixture-name)
+            `(defun ,name (&optional ,fixture-name)
+               (let ((*keep-fixture* t))
+                 (when ,fixture-name
+                   (setf *fixture* (make-instance ,fixture-name)))
+                 (with-simple-restart (abort "Abort test case")
+                   (run-test-item (get ',name 'test-case)))
+                 *last-fixture*)))))))
