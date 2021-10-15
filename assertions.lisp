@@ -35,13 +35,21 @@
 	   :test-function #'equal
 	   :from-file "expected" :to-file "actual"))))))
 
+(defvar *test-descriptions* '())
+
+(defmacro with-test-description ((fmt &rest args) &body body)
+  `(let ((*test-descriptions* (cons (format nil ,fmt ,@args)
+                                    *test-descriptions*)))
+     ,@body))
+
 (defun fail (fmt &rest args)
   "Signal a test failure. Stops execution of the test case."
   (let ((*print-level* 4)               ; FIXME - extract constants
         (*print-length* 100))
     (error 'test-failure
-           :format-control "Test failure signalled:~%~?"
-           :format-arguments (list fmt args))))
+           :format-control "Test failure signalled:~%~{~a ~}~?"
+           :format-arguments (list (reverse *test-descriptions*)
+                                   fmt args))))
 
 (defun expand-fail (fmt args fmt1 &rest args1)
   `(fail ,@(if fmt

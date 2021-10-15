@@ -53,6 +53,21 @@
   (verify-results (run-tests 'multi-fail)
                   1 '() 0 '(another-test) 0 '("test 3") 0 '(multi-fail)))
 
+(deftest/self test-description
+  (handler-case
+      (with-test-description ("[foobar]")
+        (fail "abc ~d" 42))
+      (test-failure (c)
+        (is-true (search "[foobar] abc 42" (princ-to-string c))
+                 "bad condition message: ~a" c)))
+  (handler-case
+      (with-test-description ("[foobar]")
+        (with-test-description ("[baz~d]" 42)
+          (fail "abc ~d" 42)))
+    (test-failure (c)
+      (is-true (search "[foobar] [baz42] abc 42" (princ-to-string c))
+               "bad condition message: ~a" c))))
+
 (with-alt-tests
   (define-fixture base-fixture ()
     ((seq :accessor seq :initform '()))))

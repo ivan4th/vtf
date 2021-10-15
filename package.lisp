@@ -15,6 +15,7 @@
            #:test #:deftest
            #:define-fixture
            #:with-fixture
+           #:with-test-description
            #:setup-fixture
            #:def-suite #:in-suite
            #:setup
