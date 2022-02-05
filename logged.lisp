@@ -34,12 +34,17 @@
 
 (defun expand-expecting-1 (actual-body expected-in)
   (with-gensyms (log-start actual expected)
-    (let ((use-set-p
-            (when (and (length= 1 expected-in)
-                       (proper-list-p (first expected-in))
-                       (eq :set (caar expected-in)))
-              (setf expected-in (rest (first expected-in)))
-              t)))
+    (let* ((relaxed-set-p nil)
+           (use-set-p
+             (when (and (length= 1 expected-in)
+                        (proper-list-p (first expected-in))
+                        (case (caar expected-in)
+                          (:set t)
+                          (:set*
+                           (setf relaxed-set-p t)
+                           t)))
+               (setf expected-in (rest (first expected-in)))
+               t)))
       `(let ((,log-start (log-of *fixture*)))
          (progn ,@actual-body)
          (let ((,actual (reverse (ldiff (log-of *fixture*) ,log-start)))
@@ -47,18 +52,27 @@
                                         collect (if (atom item)
                                                     item
                                                     `(list ,@item))))))
-           ,(if use-set-p
-                `(is (set-equal ,expected ,actual :test #'equal)
-                     "log mismatch:~%~
-                      ~@[Common:~%~s~]~
-                      ~@[~&Extra:~%~s~]~
-                      ~@[~&Missing:~%~s~]"
-                     (intersection ,actual ,expected :test #'equal)
-                     (set-difference ,actual ,expected :test #'equal)
-                     (set-difference ,expected ,actual :test #'equal))
-                `(is (equal ,expected ,actual)
-                     "log mismatch:~%~a"
-                     (diff ,expected ,actual))))))))
+           ,@(cond (use-set-p
+                    (append
+                     `((is (set-equal ,expected ,actual :test #'equal)
+                           "log mismatch:~%~
+                          ~{~s~%~}-->~%~
+                          ~@[Common:~%~s~]~
+                          ~@[~&Extra:~%~s~]~
+                          ~@[~&Missing:~%~s~]"
+                           ',actual-body
+                           (intersection ,actual ,expected :test #'equal)
+                           (set-difference ,actual ,expected :test #'equal)
+                           (set-difference ,expected ,actual :test #'equal)))
+                     (unless relaxed-set-p
+                       `((is-true (length= ,actual (remove-duplicates ,actual :test #'equal))
+                                  "not a set (has duplicates):~%~{~s~%~}-->~%~s"
+                                  ',actual-body ,actual)))))
+                   (t
+                    `((is (equal ,expected ,actual)
+                          "log mismatch:~%~{~s~%~}-->~%~a"
+                          ',actual-body
+                          (diff ,expected ,actual))))))))))
 
 (defmacro expecting (&body body)
   "Main event checking macro to be used with LOGGED-FIXTURE.
