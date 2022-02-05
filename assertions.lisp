@@ -45,7 +45,9 @@
 (defun fail (fmt &rest args)
   "Signal a test failure. Stops execution of the test case."
   (let ((*print-level* 4)               ; FIXME - extract constants
-        (*print-length* 100))
+        (*print-length* 100)
+        (*print-case* :downcase)
+        (*print-circle* nil))
     (error 'test-failure
            :format-control "Test failure signalled:~%~{~a ~}~?"
            :format-arguments (list (reverse *test-descriptions*)

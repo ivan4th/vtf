@@ -17,7 +17,9 @@
           collect (with-output-to-string (out)
                     (with-standard-io-syntax
                       (let ((*package* p)
-                            (*print-readably* nil))
+                            (*print-readably* nil)
+                            (*print-circle* nil)
+                            (*print-case* :downcase))
                         (write item :stream out)))))))
 
 (defmethod setup :after ((fixture logged-fixture))
