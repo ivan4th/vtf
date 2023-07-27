@@ -406,3 +406,17 @@
                           collect (item-package item)))
                  #'string<
                  :key #'package-name)))
+
+;;; HELPERS
+
+(defun unbase (value)
+  "Transform the value to avoid #A(...) output in SBCL when printing
+  SIMPLE-BASE-STRINGs readably. This function handles conses, but doesn't
+  handle structs, arrays or CLOS objects"
+  #-sbcl
+  value
+  #+sbcl
+  (typecase value
+    (simple-base-string (coerce value '(simple-array character (*))))
+    (cons (cons (unbase (car value)) (unbase (cdr value))))
+    (t value)))

@@ -81,7 +81,7 @@
 (defmethod abt-pprint ((fixture abt-lisp-output-mixin) data stream)
   (with-standard-io-syntax
       (dolist (item data)
-        (write item
+        (write (unbase item)
                :stream stream
                :pretty t
                :circle t
@@ -102,7 +102,7 @@
            (with-standard-io-syntax
              (with-output-to-string (out)
                (dolist (item data)
-                 (write item
+                 (write (unbase item)
                         :stream out
                         :pretty t
                         :right-margin 95
